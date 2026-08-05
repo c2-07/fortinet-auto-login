@@ -19,7 +19,7 @@ import (
 
 const (
 	defaultUsername = "bt25cse138"
-	defaultPassword = "********"
+	defaultPassword = ""
 	checkURL        = "http://detectportal.firefox.com/"
 
 	// Fallback gateway used for logout when no saved session exists — e.g.
@@ -150,7 +150,7 @@ func getPortal(client *http.Client) (string, bool, error) {
 		return req, err
 	}, 5)
 	if err != nil {
-		return "", false, nil // couldn't reach it, treat like Python's "return None"
+		return "", false, nil // couldn't reach it
 	}
 	defer resp.Body.Close()
 
