@@ -21,13 +21,32 @@ const (
 	checkURL = "http://detectportal.firefox.com/"
 )
 
-// The captive portal issues a fresh "magic" token per session, so it can't
-// be hardcoded — we capture it during login and stash it here so a later
-// -logout call can rebuild the right URL.
+// Magic is the token issued per session in the portal redirect — the same
+// value is reused for login, logout, and keepalive. It changes each new
+// session, so it's captured at login time and stashed here for later
+// -logout / -keepalive calls rather than hardcoded.
 type session struct {
-	Scheme string `json:"scheme"`
-	Host   string `json:"host"`
-	Magic  string `json:"magic"`
+	Scheme    string `json:"scheme"`
+	Host      string `json:"host"`
+	Magic     string `json:"magic"`
+	Countdown int    `json:"countdown"` // seconds, from the keepalive page
+}
+
+var countdownRe = regexp.MustCompile(`id="countdown">(\d+)<`)
+
+const defaultCountdown = 14400 // seconds; fallback if the page doesn't have one
+
+// extractCountdown pulls the refresh interval out of the keepalive page's
+// <b id="countdown">N</b>, falling back to the default if not found.
+func extractCountdown(body string) int {
+	if m := countdownRe.FindStringSubmatch(body); m != nil {
+		var n int
+		fmt.Sscanf(m[1], "%d", &n)
+		if n > 0 {
+			return n
+		}
+	}
+	return defaultCountdown
 }
 
 func sessionFilePath() string {
@@ -168,14 +187,6 @@ func login() bool {
 	postURL := strings.SplitN(portal, "?", 2)[0]
 	origin := fmt.Sprintf("%s://%s", parsedPortal.Scheme, parsedPortal.Host)
 
-	// Remember this session's host + magic so `-logout` can build the
-	// right URL later, even after the magic value changes next time.
-	saveSession(session{
-		Scheme: parsedPortal.Scheme,
-		Host:   parsedPortal.Host,
-		Magic:  parsedPortal.RawQuery,
-	})
-
 	resp, err := doWithRetry(client, func() (*http.Request, error) {
 		req, err := http.NewRequest(http.MethodPost, postURL, strings.NewReader(form.Encode()))
 		if err != nil {
@@ -207,6 +218,15 @@ func login() bool {
 		fmt.Println("Login failed.")
 		return false
 	}
+
+	// The magic used for logout/keepalive is the same one used for login,
+	// carried in the portal URL's query string.
+	saveSession(session{
+		Scheme:    parsedPortal.Scheme,
+		Host:      parsedPortal.Host,
+		Magic:     parsedPortal.RawQuery,
+		Countdown: extractCountdown(text),
+	})
 
 	fmt.Println("Login successful.")
 	return true
@@ -240,14 +260,63 @@ func logout() bool {
 	return true
 }
 
+// keepalive periodically hits the keepalive URL before the session's
+// countdown expires, mirroring what the browser's background tab does with
+// its timer + redirect. Runs until the process is stopped or an attempt
+// exhausts its retries.
+func keepalive() {
+	s, ok := loadSession()
+	if !ok {
+		fmt.Println("No saved session found — log in at least once before using -keepalive.")
+		return
+	}
+
+	client := makeClient()
+
+	for {
+		wait := time.Duration(s.Countdown-30) * time.Second
+		if wait <= 0 {
+			wait = 5 * time.Second
+		}
+		fmt.Printf("Sleeping %s before next keepalive hit.\n", wait)
+		time.Sleep(wait)
+
+		keepaliveURL := fmt.Sprintf("%s://%s/keepalive?%s", s.Scheme, s.Host, s.Magic)
+		resp, err := doWithRetry(client, func() (*http.Request, error) {
+			return http.NewRequest(http.MethodGet, keepaliveURL, nil)
+		}, 5)
+		if err != nil {
+			fmt.Println("Keepalive request failed, stopping:", err)
+			return
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		if err != nil {
+			fmt.Println("Failed to read keepalive response, stopping.")
+			return
+		}
+
+		s.Countdown = extractCountdown(string(body))
+		saveSession(s)
+		fmt.Println("Keepalive refreshed.")
+	}
+}
+
 func main() {
 	logoutFlag := flag.Bool("logout", false, "log out of the captive portal instead of logging in")
+	keepaliveFlag := flag.Bool("keepalive", false, "keep the current session alive instead of logging in")
 	flag.Parse()
 
 	if *logoutFlag {
 		if !logout() {
 			fmt.Println("Unable to log out.")
 		}
+		return
+	}
+
+	if *keepaliveFlag {
+		keepalive()
 		return
 	}
 
