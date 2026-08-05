@@ -22,6 +22,10 @@ const (
 	password = "********"
 	checkURL = "http://detectportal.firefox.com/"
 
+	// Fallback gateway used for logout when no saved session exists — e.g.
+	// the script never ran login in this environment, or the cache was
+	// cleared. The portal doesn't validate the magic against the actual
+	// session, so a random one of the right shape works.
 	fallbackScheme = "https"
 	fallbackHost   = "192.168.55.253:1003"
 )
@@ -320,9 +324,29 @@ func keepalive() {
 	}
 }
 
+// daemon runs forever, polling login() at a fixed interval. login() already
+// short-circuits fast when already connected, so this is cheap while
+// connected and will transparently re-authenticate whenever the session
+// drops (AP switch, sleep/wake, portal timeout) without needing to detect
+// network-change events at the OS level.
+func daemon(interval time.Duration) {
+	fmt.Printf("Daemon mode: polling every %s.\n", interval)
+	for {
+		ts := time.Now().Format("15:04:05")
+		if login() {
+			// quiet on success after the first line login() already prints
+		} else {
+			fmt.Printf("[%s] Login attempt failed, will retry next poll.\n", ts)
+		}
+		time.Sleep(interval)
+	}
+}
+
 func main() {
 	logoutFlag := flag.Bool("logout", false, "log out of the captive portal instead of logging in")
 	keepaliveFlag := flag.Bool("keepalive", false, "keep the current session alive instead of logging in")
+	daemonFlag := flag.Bool("daemon", false, "run forever, auto re-logging in whenever the session drops")
+	intervalFlag := flag.Duration("interval", 45*time.Second, "polling interval for -daemon")
 	flag.Parse()
 
 	if *logoutFlag {
@@ -334,6 +358,11 @@ func main() {
 
 	if *keepaliveFlag {
 		keepalive()
+		return
+	}
+
+	if *daemonFlag {
+		daemon(*intervalFlag)
 		return
 	}
 
