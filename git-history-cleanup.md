@@ -70,5 +70,23 @@ rm replacements.txt
 
 ---
 
+# How to Remove Files from Git History
+
+If you accidentally committed a large binary file, a compiled executable (like `auto-login`), or sensitive files, you can remove the entire file from all commits using the same tool.
+
+```bash
+git filter-repo --path filename1 --path filename2 --invert-paths --force
+```
+*(Replace `filename1` with the exact path of the file you want to remove).*
+
+Just like text replacement, this will remove your remote. You must restore it and force push:
+
+```bash
+git remote add origin https://github.com/your-username/your-repo-name.git
+git push --force origin main
+```
+
+---
+
 ### ⚠️ IMPORTANT SECURITY NOTE
 If a password or API key was pushed to a public repository on GitHub, **assume it is compromised immediately.** Bots scan public repositories for leaked secrets within seconds. Even after removing it from your history, you **must** change the exposed password or revoke the exposed API key on the corresponding service.
