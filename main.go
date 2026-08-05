@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -19,6 +21,9 @@ const (
 	username = "bt25cse138"
 	password = "********"
 	checkURL = "http://detectportal.firefox.com/"
+
+	fallbackScheme = "https"
+	fallbackHost   = "192.168.55.253:1003"
 )
 
 // Magic is the token issued per session in the portal redirect — the same
@@ -75,6 +80,18 @@ func loadSession() (session, bool) {
 		return s, false
 	}
 	return s, s.Host != "" && s.Magic != ""
+}
+
+// randomMagic generates a random hex string shaped like the real magic
+// tokens (16 hex chars), for use when we have no saved session to logout
+// with.
+func randomMagic() string {
+	buf := make([]byte, 8)
+	if _, err := rand.Read(buf); err != nil {
+		// Extremely unlikely, but fall back to something well-formed anyway.
+		return "0000000000000000"
+	}
+	return hex.EncodeToString(buf)
 }
 
 var portalRe = regexp.MustCompile(`window\.location="([^"]+)"`)
@@ -235,8 +252,8 @@ func login() bool {
 func logout() bool {
 	s, ok := loadSession()
 	if !ok {
-		fmt.Println("No saved session found — log in at least once before using -logout.")
-		return false
+		fmt.Println("No saved session found — using a random magic against the default gateway.")
+		s = session{Scheme: fallbackScheme, Host: fallbackHost, Magic: randomMagic()}
 	}
 
 	logoutURL := fmt.Sprintf("%s://%s/logout?%s", s.Scheme, s.Host, s.Magic)
