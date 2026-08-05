@@ -1,3 +1,3 @@
-module fortinet/auto-login
+module fortinet/autologin
 
 go 1.26.5

@@ -18,9 +18,9 @@ import (
 )
 
 const (
-	username = "bt25cse138"
-	password = "********"
-	checkURL = "http://detectportal.firefox.com/"
+	defaultUsername = "bt25cse138"
+	defaultPassword = "********"
+	checkURL        = "http://detectportal.firefox.com/"
 
 	// Fallback gateway used for logout when no saved session exists — e.g.
 	// the script never ran login in this environment, or the cache was
@@ -29,6 +29,9 @@ const (
 	fallbackScheme = "https"
 	fallbackHost   = "192.168.55.253:1003"
 )
+
+// Set from CLI flags in main(), falling back to the defaults above if unset.
+var username, password string
 
 // Magic is the token issued per session in the portal redirect — the same
 // value is reused for login, logout, and keepalive. It changes each new
@@ -98,6 +101,11 @@ func randomMagic() string {
 	return hex.EncodeToString(buf)
 }
 
+// logf prints a timestamped log line.
+func logf(format string, args ...any) {
+	fmt.Printf("[%s] %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+}
+
 var portalRe = regexp.MustCompile(`window\.location="([^"]+)"`)
 
 func makeClient() *http.Client {
@@ -152,7 +160,6 @@ func getPortal(client *http.Client) (string, bool, error) {
 	}
 	text := strings.TrimSpace(string(body))
 	if text == "success" {
-		fmt.Println("Already connected.")
 		return "", true, nil
 	}
 
@@ -163,15 +170,18 @@ func getPortal(client *http.Client) (string, bool, error) {
 	return matches[1], false, nil
 }
 
-func login() bool {
+func login(quiet bool) bool {
 	client := makeClient()
 
 	portal, alreadyConnected, err := getPortal(client)
 	if alreadyConnected {
+		if !quiet {
+			logf("Already connected.")
+		}
 		return true
 	}
 	if err != nil || portal == "" {
-		fmt.Println("Couldn't detect captive portal.")
+		logf("Couldn't detect captive portal.")
 		return false
 	}
 
@@ -180,14 +190,14 @@ func login() bool {
 		return http.NewRequest(http.MethodGet, portal, nil)
 	}, 5)
 	if err != nil {
-		fmt.Println("Failed to load login page.")
+		logf("Failed to load login page.")
 		return false
 	}
 	defer pageResp.Body.Close()
 	io.Copy(io.Discard, pageResp.Body)
 
 	if pageResp.StatusCode != http.StatusOK {
-		fmt.Println("Failed to load login page.")
+		logf("Failed to load login page (status %d).", pageResp.StatusCode)
 		return false
 	}
 
@@ -195,7 +205,7 @@ func login() bool {
 
 	parsedPortal, err := url.Parse(portal)
 	if err != nil {
-		fmt.Println("Couldn't parse portal URL.")
+		logf("Couldn't parse portal URL.")
 		return false
 	}
 
@@ -223,40 +233,41 @@ func login() bool {
 		return req, nil
 	}, 5)
 	if err != nil {
-		fmt.Println("Login request failed.")
+		logf("Login request failed.")
 		return false
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		fmt.Println("Failed to read login response.")
+		logf("Failed to read login response.")
 		return false
 	}
 	text := string(body)
 
 	if strings.Contains(text, "Failed") || strings.Contains(text, "Invalid") {
-		fmt.Println("Login failed.")
+		logf("Login failed.")
 		return false
 	}
 
 	// The magic used for logout/keepalive is the same one used for login,
 	// carried in the portal URL's query string.
-	saveSession(session{
+	s := session{
 		Scheme:    parsedPortal.Scheme,
 		Host:      parsedPortal.Host,
 		Magic:     parsedPortal.RawQuery,
 		Countdown: extractCountdown(text),
-	})
+	}
+	saveSession(s)
 
-	fmt.Println("Login successful.")
+	logf("Logged in — host=%s magic=%s countdown=%ds", s.Host, s.Magic, s.Countdown)
 	return true
 }
 
 func logout() bool {
 	s, ok := loadSession()
 	if !ok {
-		fmt.Println("No saved session found — using a random magic against the default gateway.")
+		logf("No saved session — using a random magic against the default gateway.")
 		s = session{Scheme: fallbackScheme, Host: fallbackHost, Magic: randomMagic()}
 	}
 
@@ -267,17 +278,17 @@ func logout() bool {
 		return http.NewRequest(http.MethodGet, logoutURL, nil)
 	}, 5)
 	if err != nil {
-		fmt.Println("Logout request failed.")
+		logf("Logout request failed.")
 		return false
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		fmt.Printf("Logout returned status %d.\n", resp.StatusCode)
+		logf("Logout returned status %d.", resp.StatusCode)
 		return false
 	}
-	fmt.Println("Logged out.")
+	logf("Logged out — host=%s magic=%s", s.Host, s.Magic)
 	return true
 }
 
@@ -288,9 +299,10 @@ func logout() bool {
 func keepalive() {
 	s, ok := loadSession()
 	if !ok {
-		fmt.Println("No saved session found — log in at least once before using -keepalive.")
+		logf("No saved session — log in at least once before using -keepalive.")
 		return
 	}
+	logf("Starting keepalive — host=%s magic=%s countdown=%ds", s.Host, s.Magic, s.Countdown)
 
 	client := makeClient()
 
@@ -299,7 +311,6 @@ func keepalive() {
 		if wait <= 0 {
 			wait = 5 * time.Second
 		}
-		fmt.Printf("Sleeping %s before next keepalive hit.\n", wait)
 		time.Sleep(wait)
 
 		keepaliveURL := fmt.Sprintf("%s://%s/keepalive?%s", s.Scheme, s.Host, s.Magic)
@@ -307,20 +318,20 @@ func keepalive() {
 			return http.NewRequest(http.MethodGet, keepaliveURL, nil)
 		}, 5)
 		if err != nil {
-			fmt.Println("Keepalive request failed, stopping:", err)
+			logf("Keepalive request failed, stopping: %v", err)
 			return
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			fmt.Println("Failed to read keepalive response, stopping.")
+			logf("Failed to read keepalive response, stopping.")
 			return
 		}
 
 		s.Countdown = extractCountdown(string(body))
 		saveSession(s)
-		fmt.Println("Keepalive refreshed.")
+		logf("Keepalive ok — countdown reset to %ds", s.Countdown)
 	}
 }
 
@@ -330,52 +341,70 @@ func keepalive() {
 // drops (AP switch, sleep/wake, portal timeout) without needing to detect
 // network-change events at the OS level.
 func daemon(interval time.Duration) {
-	fmt.Printf("Daemon mode: polling every %s.\n", interval)
+	logf("Daemon started — polling every %s.", interval)
 	for {
-		ts := time.Now().Format("15:04:05")
-		if login() {
-			// quiet on success after the first line login() already prints
-		} else {
-			fmt.Printf("[%s] Login attempt failed, will retry next poll.\n", ts)
-		}
+		login(true)
 		time.Sleep(interval)
 	}
 }
 
 func main() {
-	logoutFlag := flag.Bool("logout", false, "log out of the captive portal instead of logging in")
-	keepaliveFlag := flag.Bool("keepalive", false, "keep the current session alive instead of logging in")
-	daemonFlag := flag.Bool("daemon", false, "run forever, auto re-logging in whenever the session drops")
-	intervalFlag := flag.Duration("interval", 45*time.Second, "polling interval for -daemon")
+	var usernameFlag, passwordFlag string
+	flag.StringVar(&usernameFlag, "username", "", "portal username (defaults to the built-in one)")
+	flag.StringVar(&usernameFlag, "u", "", "shorthand for -username")
+	flag.StringVar(&passwordFlag, "password", "", "portal password (defaults to the built-in one)")
+	flag.StringVar(&passwordFlag, "p", "", "shorthand for -password")
+
+	var logoutFlag, keepaliveFlag, daemonFlag bool
+	flag.BoolVar(&logoutFlag, "logout", false, "log out of the captive portal instead of logging in")
+	flag.BoolVar(&logoutFlag, "l", false, "shorthand for -logout")
+	flag.BoolVar(&keepaliveFlag, "keepalive", false, "keep the current session alive instead of logging in")
+	flag.BoolVar(&keepaliveFlag, "k", false, "shorthand for -keepalive")
+	flag.BoolVar(&daemonFlag, "daemon", false, "run forever, auto re-logging in whenever the session drops")
+	flag.BoolVar(&daemonFlag, "d", false, "shorthand for -daemon")
+
+	var intervalFlag time.Duration
+	flag.DurationVar(&intervalFlag, "interval", 45*time.Second, "polling interval for -daemon")
+	flag.DurationVar(&intervalFlag, "i", 45*time.Second, "shorthand for -interval")
+
 	flag.Parse()
 
-	if *logoutFlag {
+	username = defaultUsername
+	if usernameFlag != "" {
+		username = usernameFlag
+	}
+	password = defaultPassword
+	if passwordFlag != "" {
+		password = passwordFlag
+	}
+
+	if logoutFlag {
 		if !logout() {
-			fmt.Println("Unable to log out.")
+			logf("Unable to log out.")
 		}
 		return
 	}
 
-	if *keepaliveFlag {
+	if keepaliveFlag {
 		keepalive()
 		return
 	}
 
-	if *daemonFlag {
-		daemon(*intervalFlag)
+	if daemonFlag {
+		daemon(intervalFlag)
 		return
 	}
 
 	success := false
 	for attempt := 1; attempt <= 5; attempt++ {
-		fmt.Printf("Attempt %d\n", attempt)
-		if login() {
+		logf("Attempt %d", attempt)
+		if login(false) {
 			success = true
 			break
 		}
 		time.Sleep(2 * time.Second)
 	}
 	if !success {
-		fmt.Println("Unable to authenticate.")
+		logf("Unable to authenticate.")
 	}
 }
