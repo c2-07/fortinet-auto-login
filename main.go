@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/hex"
@@ -15,11 +16,11 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"golang.org/x/term"
 )
 
 const (
-	defaultUsername = "bt25cse138"
-	defaultPassword = ""
 	checkURL        = "http://detectportal.firefox.com/"
 
 	// Fallback gateway used for logout when no saved session exists — e.g.
@@ -30,8 +31,14 @@ const (
 	fallbackHost   = "192.168.55.253:1003"
 )
 
-// Set from CLI flags in main(), falling back to the defaults above if unset.
+// Set from CLI flags or credential cache/prompts in main()
 var username, password string
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
 
 // Magic is the token issued per session in the portal redirect — the same
 // value is reused for login, logout, and keepalive. It changes each new
@@ -42,6 +49,11 @@ type session struct {
 	Host      string `json:"host"`
 	Magic     string `json:"magic"`
 	Countdown int    `json:"countdown"` // seconds, from the keepalive page
+}
+
+type credentials struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
 }
 
 var countdownRe = regexp.MustCompile(`id="countdown">(\d+)<`)
@@ -87,6 +99,85 @@ func loadSession() (session, bool) {
 		return s, false
 	}
 	return s, s.Host != "" && s.Magic != ""
+}
+
+func credentialsFilePath() string {
+	dir := os.Getenv("XDG_CACHE_HOME")
+	if dir == "" {
+		var err error
+		dir, err = os.UserCacheDir()
+		if err != nil {
+			dir = os.TempDir()
+		}
+	}
+	return filepath.Join(dir, "captive-portal-credentials.json")
+}
+
+func loadCredentials() (credentials, bool) {
+	var c credentials
+	data, err := os.ReadFile(credentialsFilePath())
+	if err != nil {
+		return c, false
+	}
+	if err := json.Unmarshal(data, &c); err != nil {
+		return c, false
+	}
+	return c, c.Username != "" && c.Password != ""
+}
+
+func saveCredentials(c credentials) {
+	data, err := json.MarshalIndent(c, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(credentialsFilePath(), data, 0o600)
+}
+
+func deleteCredentials() {
+	_ = os.Remove(credentialsFilePath())
+}
+
+func promptCredentials() credentials {
+	reader := bufio.NewReader(os.Stdin)
+
+	fmt.Print("Username: ")
+	user, _ := reader.ReadString('\n')
+	user = strings.TrimSpace(user)
+
+	fmt.Print("Password: ")
+	passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+	if err != nil {
+		fmt.Println()
+		logf("Failed to read password: %v", err)
+		os.Exit(1)
+	}
+	fmt.Println()
+	pass := strings.TrimSpace(string(passBytes))
+
+	c := credentials{Username: user, Password: pass}
+	saveCredentials(c)
+	return c
+}
+
+func initCredentials(usernameFlag, passwordFlag string) {
+	if usernameFlag != "" && passwordFlag != "" {
+		username = usernameFlag
+		password = passwordFlag
+		saveCredentials(credentials{Username: username, Password: password})
+		return
+	}
+
+	if usernameFlag != "" || passwordFlag != "" {
+		fmt.Println("Error: Both -username and -password must be supplied together, or neither.")
+		os.Exit(1)
+	}
+
+	c, ok := loadCredentials()
+	if !ok {
+		c = promptCredentials()
+	}
+	username = c.Username
+	password = c.Password
 }
 
 // randomMagic generates a random hex string shaped like the real magic
@@ -170,7 +261,7 @@ func getPortal(client *http.Client) (string, bool, error) {
 	return matches[1], false, nil
 }
 
-func login(quiet bool) bool {
+func login(quiet bool, isRetry bool) bool {
 	client := makeClient()
 
 	portal, alreadyConnected, err := getPortal(client)
@@ -246,7 +337,14 @@ func login(quiet bool) bool {
 	text := string(body)
 
 	if strings.Contains(text, "Failed") || strings.Contains(text, "Invalid") {
-		logf("Login failed.")
+		logf("Login failed (invalid credentials).")
+		if !isRetry {
+			deleteCredentials()
+			c := promptCredentials()
+			username = c.Username
+			password = c.Password
+			return login(quiet, true)
+		}
 		return false
 	}
 
@@ -343,16 +441,16 @@ func keepalive() {
 func daemon(interval time.Duration) {
 	logf("Daemon started — polling every %s.", interval)
 	for {
-		login(true)
+		login(true, false)
 		time.Sleep(interval)
 	}
 }
 
 func main() {
 	var usernameFlag, passwordFlag string
-	flag.StringVar(&usernameFlag, "username", "", "portal username (defaults to the built-in one)")
+	flag.StringVar(&usernameFlag, "username", "", "portal username")
 	flag.StringVar(&usernameFlag, "u", "", "shorthand for -username")
-	flag.StringVar(&passwordFlag, "password", "", "portal password (defaults to the built-in one)")
+	flag.StringVar(&passwordFlag, "password", "", "portal password")
 	flag.StringVar(&passwordFlag, "p", "", "shorthand for -password")
 
 	var logoutFlag, keepaliveFlag, daemonFlag bool
@@ -367,16 +465,18 @@ func main() {
 	flag.DurationVar(&intervalFlag, "interval", 45*time.Second, "polling interval for -daemon")
 	flag.DurationVar(&intervalFlag, "i", 45*time.Second, "shorthand for -interval")
 
+	var versionFlag bool
+	flag.BoolVar(&versionFlag, "version", false, "print version information and exit")
+	flag.BoolVar(&versionFlag, "v", false, "shorthand for -version")
+
 	flag.Parse()
 
-	username = defaultUsername
-	if usernameFlag != "" {
-		username = usernameFlag
+	if versionFlag {
+		fmt.Printf("fortinet-auto-login %s, commit %s, built at %s\n", version, commit, date)
+		return
 	}
-	password = defaultPassword
-	if passwordFlag != "" {
-		password = passwordFlag
-	}
+
+	initCredentials(usernameFlag, passwordFlag)
 
 	if logoutFlag {
 		if !logout() {
@@ -398,7 +498,7 @@ func main() {
 	success := false
 	for attempt := 1; attempt <= 5; attempt++ {
 		logf("Attempt %d", attempt)
-		if login(false) {
+		if login(false, false) {
 			success = true
 			break
 		}
