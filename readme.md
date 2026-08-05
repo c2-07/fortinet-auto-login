@@ -23,7 +23,24 @@ tool:
 
 <!-- ![Login flow](docs/screenshots/login-flow.png) -->
 
-## Build
+## Installation
+
+### Download from Releases
+You can download the latest pre-compiled binaries for Linux, macOS, and Windows directly from the [Releases](../../releases/latest) page.
+
+After downloading, make the binary executable and move it to your global shell environment (`PATH`):
+
+```bash
+# Make it executable (Linux/macOS)
+chmod +x fortinet-auto-login-*
+
+# Move it to a directory in your PATH (e.g. /usr/local/bin)
+sudo mv fortinet-auto-login-* /usr/local/bin/autologin
+```
+
+Now you can run it from anywhere in your terminal using the `autologin` command.
+
+### Build from source
 
 ```bash
 go build -o autologin .
@@ -45,18 +62,17 @@ GOOS=windows GOARCH=amd64 go build -o autologin.exe .
 ./autologin [flags]
 ```
 
-| Flag         | Shorthand | Default          | Description                                           |
-| ------------ | --------- | ---------------- | ----------------------------------------------------- |
-| `-username`  | `-u`      | built-in default | Portal username                                       |
-| `-password`  | `-p`      | built-in default | Portal password                                       |
-| `-logout`    | `-l`      | `false`          | Log out instead of logging in                         |
-| `-keepalive` | `-k`      | `false`          | Keep the current session alive (blocking loop)        |
-| `-daemon`    | `-d`      | `false`          | Run forever, auto re-login whenever the session drops |
-| `-interval`  | `-i`      | `45s`            | Poll interval for `-daemon`                           |
+| Flag         | Shorthand | Default | Description                                           |
+| ------------ | --------- | ------- | ----------------------------------------------------- |
+| `-username`  | `-u`      |         | Portal username (saved to credential cache)           |
+| `-password`  | `-p`      |         | Portal password (saved to credential cache)           |
+| `-logout`    | `-l`      | `false` | Log out instead of logging in                         |
+| `-keepalive` | `-k`      | `false` | Keep the current session alive (blocking loop)        |
+| `-daemon`    | `-d`      | `false` | Run forever, auto re-login whenever the session drops |
+| `-interval`  | `-i`      | `45s`   | Poll interval for `-daemon`                           |
+| `-version`   | `-v`      | `false` | Print version information and exit                    |
 
-Credentials are baked in as defaults so you can run the tool with zero flags
-on your own machine; the `-u`/`-p` flags exist for overriding them (e.g. a
-teammate using the same script with their own login) without editing source.
+The tool uses a secure persistent credential cache. When you run it for the first time without flags, it will interactively prompt you for your username and password, which are then saved in `$XDG_CACHE_HOME/captive-portal-credentials.json` with secure permissions (`0600`). You can also supply `-u` and `-p` flags explicitly to provide or update these credentials without editing the source.
 
 ### Examples
 
