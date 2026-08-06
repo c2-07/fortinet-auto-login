@@ -6,6 +6,8 @@ and a "keepalive" window that has to stay open). Written in Go, no external
 dependencies, cross-compiles for macOS/Linux/Windows.
 
 <!-- ![Demo](docs/screenshots/demo.gif) -->
+<img width="3140" height="2046" alt="image" src="https://github.com/user-attachments/assets/c255bf52-f1a3-4ce1-899a-0fe378ac7311" />
+
 
 ## How it works
 
