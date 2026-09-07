@@ -88,6 +88,11 @@ func notifyCredentialsNeeded() bool {
 		exec.Command("notify-send", "Fortinet Auto Login", "Invalid or missing credentials. Please run autologin in your terminal to update them.", "-u", "critical").Run()
 		os.WriteFile(notifiedFile, []byte("1"), 0644)
 		return true
+	} else if runtime.GOOS == "windows" {
+		script := `$wshell = New-Object -ComObject Wscript.Shell; $wshell.Popup("Invalid or missing credentials. Please run autologin in your terminal to update them.", 0, "Fortinet Auto Login", 0x30)`
+		exec.Command("powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", script).Run()
+		os.WriteFile(notifiedFile, []byte("1"), 0644)
+		return true
 	}
 	return false
 }
@@ -108,8 +113,10 @@ func installAgent() {
 		installDarwin(exe)
 	} else if runtime.GOOS == "linux" {
 		installLinux(exe)
+	} else if runtime.GOOS == "windows" {
+		installWindows(exe)
 	} else {
-		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install is only supported on macOS and Linux")
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install is only supported on macOS, Linux, and Windows")
 	}
 }
 
@@ -118,8 +125,10 @@ func uninstallAgent() {
 		uninstallDarwin()
 	} else if runtime.GOOS == "linux" {
 		uninstallLinux()
+	} else if runtime.GOOS == "windows" {
+		uninstallWindows()
 	} else {
-		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall is only supported on macOS and Linux")
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall is only supported on macOS, Linux, and Windows")
 	}
 }
 
@@ -247,6 +256,39 @@ func uninstallLinux() {
 		return
 	}
 	exec.Command("systemctl", "--user", "daemon-reload").Run()
+
+	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
+}
+
+func installWindows(exe string) {
+	script := fmt.Sprintf(`
+$action = New-ScheduledTaskAction -Execute "%s" -Argument "-daemon"
+$trigger = New-ScheduledTaskTrigger -AtLogOn
+$settings = New-ScheduledTaskSettingsSet -Hidden -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0
+Register-ScheduledTask -TaskName "FortinetAutoLogin" -Action $action -Trigger $trigger -Settings $settings -Force
+`, exe)
+
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to create Scheduled Task: %v\nOutput: %s\n", err, string(out))
+		return
+	}
+
+	exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", "Start-ScheduledTask -TaskName 'FortinetAutoLogin'").Run()
+
+	fmt.Println("\033[32m[OK]\033[0m     Installed successfully")
+	fmt.Println("\033[36m[INFO]\033[0m   Background service active (Windows Task Scheduler)")
+}
+
+func uninstallWindows() {
+	script := `Unregister-ScheduledTask -TaskName "FortinetAutoLogin" -Confirm:$false`
+	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to remove Scheduled Task: %v\nOutput: %s\n", err, string(out))
+		return
+	}
 
 	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
 }

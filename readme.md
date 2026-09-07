@@ -109,28 +109,19 @@ Rather than reacting to Wi-Fi connect/disconnect events (fragile on both
 OSes), the daemon just polls every `-interval` and no-ops instantly if
 already connected, re-authenticating only when the session actually drops.
 
-### macOS & Linux
+### macOS, Linux, and Windows
 
-We provide a built-in command to easily install a background service (`LaunchAgent` on macOS, `systemd` user service on Linux) that automatically logs you in whenever you connect to Wi-Fi.
+We provide a built-in command to easily install a background service (`LaunchAgent` on macOS, `systemd` on Linux, and `Scheduled Task` on Windows) that automatically logs you in whenever you connect to Wi-Fi.
 
 Simply run:
 ```bash
 ./autologin -install
 ```
-This will set up the agent to automatically re-authenticate in the background! Logs are written to `/tmp/autologin.log`.
+This will set up the agent to automatically re-authenticate in the background!
 
 To remove the background service at any time:
 ```bash
 ./autologin -uninstall
-```
-
-### Windows — Scheduled Task
-
-```powershell
-$action = New-ScheduledTaskAction -Execute "C:\Tools\autologin.exe" -Argument "-daemon"
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-$settings = New-ScheduledTaskSettingsSet -Hidden -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0
-Register-ScheduledTask -TaskName "AutoLogin-WiFi" -Action $action -Trigger $trigger -Settings $settings -RunLevel Limited
 ```
 
 ## Notes
