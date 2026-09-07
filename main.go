@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"crypto/rand"
 	"crypto/tls"
+	"os/exec"
+	"runtime"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -54,6 +56,7 @@ type session struct {
 type credentials struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+	SSID     string `json:"ssid"`
 }
 
 var countdownRe = regexp.MustCompile(`id="countdown">(\d+)<`)
@@ -131,6 +134,7 @@ func saveCredentials(c credentials) {
 		return
 	}
 	_ = os.WriteFile(credentialsFilePath(), data, 0o600)
+	os.Remove(credentialsFilePath() + ".notified")
 }
 
 func deleteCredentials() {
@@ -148,7 +152,7 @@ func promptCredentials() credentials {
 	passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println()
-		logf("Failed to read password: %v", err)
+		logf("\033[31m[ ERR ]\033[0m    Password read failed: %v", err)
 		os.Exit(1)
 	}
 	fmt.Println()
@@ -168,7 +172,7 @@ func initCredentials(usernameFlag, passwordFlag string) {
 	}
 
 	if usernameFlag != "" || passwordFlag != "" {
-		fmt.Println("Error: Both -username and -password must be supplied together, or neither.")
+		fmt.Println("\033[31m[ ERR ]\033[0m    -username and -password require each other")
 		os.Exit(1)
 	}
 
@@ -264,16 +268,26 @@ func getPortal(client *http.Client) (string, bool, error) {
 func login(quiet bool, isRetry bool) bool {
 	client := makeClient()
 
+	if !quiet {
+		logf("\033[34m[ NET ]\033[0m    Checking internet (Mozilla method)...")
+	}
 	portal, alreadyConnected, err := getPortal(client)
 	if alreadyConnected {
 		if !quiet {
-			logf("Already connected.")
+			logf("\033[32m[ OK ]\033[0m     Internet connected")
 		}
 		return true
 	}
 	if err != nil || portal == "" {
-		logf("Couldn't detect captive portal.")
+		if !quiet {
+			logf("\033[31m[ FAIL ]\033[0m   Network unreachable")
+		}
 		return false
+	}
+
+	if !quiet {
+		logf("\033[33m[ PORTAL ]\033[0m %s", portal)
+		logf("\033[34m[ AUTH ]\033[0m  User: %s", username)
 	}
 
 	// Visit the portal first to establish cookies/session.
@@ -337,13 +351,18 @@ func login(quiet bool, isRetry bool) bool {
 	text := string(body)
 
 	if strings.Contains(text, "Failed") || strings.Contains(text, "Invalid") {
-		logf("Login failed (invalid credentials).")
-		if !isRetry {
+		logf("\033[31m[ FAIL ]\033[0m   Invalid credentials")
+		if !isRetry && !quiet {
 			deleteCredentials()
 			c := promptCredentials()
 			username = c.Username
 			password = c.Password
 			return login(quiet, true)
+		}
+		if quiet {
+			deleteCredentials()
+			logf("Invalid credentials deleted. Run './autologin' in terminal to enter new ones.")
+			notifyCredentialsNeeded()
 		}
 		return false
 	}
@@ -358,14 +377,14 @@ func login(quiet bool, isRetry bool) bool {
 	}
 	saveSession(s)
 
-	logf("Logged in — host=%s magic=%s countdown=%ds", s.Host, s.Magic, s.Countdown)
+	logf("\033[32m[ OK ]\033[0m     Auth success (host=%s magic=%s)", s.Host, s.Magic)
 	return true
 }
 
 func logout() bool {
 	s, ok := loadSession()
 	if !ok {
-		logf("No saved session — using a random magic against the default gateway.")
+		logf("\033[33m[ WARN ]\033[0m   No session. Using random magic.")
 		s = session{Scheme: fallbackScheme, Host: fallbackHost, Magic: randomMagic()}
 	}
 
@@ -376,17 +395,17 @@ func logout() bool {
 		return http.NewRequest(http.MethodGet, logoutURL, nil)
 	}, 5)
 	if err != nil {
-		logf("Logout request failed.")
+		logf("\033[31m[ FAIL ]\033[0m   Logout request failed")
 		return false
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		logf("Logout returned status %d.", resp.StatusCode)
+		logf("\033[31m[ FAIL ]\033[0m   Logout HTTP %d", resp.StatusCode)
 		return false
 	}
-	logf("Logged out — host=%s magic=%s", s.Host, s.Magic)
+	logf("\033[32m[ OK ]\033[0m     Logged out (host=%s magic=%s)", s.Host, s.Magic)
 	return true
 }
 
@@ -397,10 +416,10 @@ func logout() bool {
 func keepalive() {
 	s, ok := loadSession()
 	if !ok {
-		logf("No saved session — log in at least once before using -keepalive.")
+		logf("\033[31m[ FAIL ]\033[0m   No session for keepalive")
 		return
 	}
-	logf("Starting keepalive — host=%s magic=%s countdown=%ds", s.Host, s.Magic, s.Countdown)
+	logf("\033[36m[ INIT ]\033[0m   Keepalive (host=%s magic=%s timeout=%ds)", s.Host, s.Magic, s.Countdown)
 
 	client := makeClient()
 
@@ -416,20 +435,20 @@ func keepalive() {
 			return http.NewRequest(http.MethodGet, keepaliveURL, nil)
 		}, 5)
 		if err != nil {
-			logf("Keepalive request failed, stopping: %v", err)
+			logf("\033[31m[ FAIL ]\033[0m   Keepalive err: %v", err)
 			return
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			logf("Failed to read keepalive response, stopping.")
+			logf("\033[31m[ FAIL ]\033[0m   Keepalive read err")
 			return
 		}
 
 		s.Countdown = extractCountdown(string(body))
 		saveSession(s)
-		logf("Keepalive ok — countdown reset to %ds", s.Countdown)
+		logf("\033[32m[ OK ]\033[0m     Keepalive (reset=%ds)", s.Countdown)
 	}
 }
 
@@ -439,7 +458,7 @@ func keepalive() {
 // drops (AP switch, sleep/wake, portal timeout) without needing to detect
 // network-change events at the OS level.
 func daemon(interval time.Duration) {
-	logf("Daemon started — polling every %s.", interval)
+	logf("\033[36m[ INIT ]\033[0m   Daemon started (interval=%s)", interval)
 	for {
 		login(true, false)
 		time.Sleep(interval)
@@ -480,7 +499,7 @@ func main() {
 
 	if logoutFlag {
 		if !logout() {
-			logf("Unable to log out.")
+			logf("\033[31m[ FAIL ]\033[0m   Logout failed")
 		}
 		return
 	}
@@ -497,7 +516,9 @@ func main() {
 
 	success := false
 	for attempt := 1; attempt <= 5; attempt++ {
-		logf("Attempt %d", attempt)
+		if attempt > 1 {
+			logf("\033[36m[ RETRY ]\033[0m  %d/5", attempt)
+		}
 		if login(false, false) {
 			success = true
 			break
@@ -505,6 +526,6 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 	if !success {
-		logf("Unable to authenticate.")
+		logf("\033[31m[ FAIL ]\033[0m   Auth failed")
 	}
 }
