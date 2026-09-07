@@ -109,9 +109,9 @@ Rather than reacting to Wi-Fi connect/disconnect events (fragile on both
 OSes), the daemon just polls every `-interval` and no-ops instantly if
 already connected, re-authenticating only when the session actually drops.
 
-### macOS
+### macOS & Linux
 
-We provide a built-in command to easily install a background macOS `LaunchAgent` that automatically logs you in whenever you connect to Wi-Fi.
+We provide a built-in command to easily install a background service (`LaunchAgent` on macOS, `systemd` user service on Linux) that automatically logs you in whenever you connect to Wi-Fi.
 
 Simply run:
 ```bash

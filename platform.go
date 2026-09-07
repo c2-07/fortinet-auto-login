@@ -74,25 +74,25 @@ func getCurrentSSID() (string, error) {
 }
 
 func notifyCredentialsNeeded() bool {
-	if runtime.GOOS != "darwin" {
-		return false
-	}
 	notifiedFile := credentialsFilePath() + ".notified"
 	if _, err := os.Stat(notifiedFile); err == nil {
 		return false
 	}
-	script := `display notification "Invalid or missing credentials. Please run autologin in your terminal to update them." with title "Fortinet Auto Login"`
-	exec.Command("osascript", "-e", script).Run()
-	os.WriteFile(notifiedFile, []byte("1"), 0644)
-	return true
+
+	if runtime.GOOS == "darwin" {
+		script := `display notification "Invalid or missing credentials. Please run autologin in your terminal to update them." with title "Fortinet Auto Login"`
+		exec.Command("osascript", "-e", script).Run()
+		os.WriteFile(notifiedFile, []byte("1"), 0644)
+		return true
+	} else if runtime.GOOS == "linux" {
+		exec.Command("notify-send", "Fortinet Auto Login", "Invalid or missing credentials. Please run autologin in your terminal to update them.", "-u", "critical").Run()
+		os.WriteFile(notifiedFile, []byte("1"), 0644)
+		return true
+	}
+	return false
 }
 
 func installAgent() {
-	if runtime.GOOS != "darwin" {
-		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install requires macOS")
-		return
-	}
-
 	_, ok := loadCredentials()
 	if !ok {
 		promptCredentials()
@@ -104,6 +104,26 @@ func installAgent() {
 		return
 	}
 
+	if runtime.GOOS == "darwin" {
+		installDarwin(exe)
+	} else if runtime.GOOS == "linux" {
+		installLinux(exe)
+	} else {
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install is only supported on macOS and Linux")
+	}
+}
+
+func uninstallAgent() {
+	if runtime.GOOS == "darwin" {
+		uninstallDarwin()
+	} else if runtime.GOOS == "linux" {
+		uninstallLinux()
+	} else {
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall is only supported on macOS and Linux")
+	}
+}
+
+func installDarwin(exe string) {
 	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.fortinet.autologin.plist")
 	plistContent := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -132,7 +152,7 @@ func installAgent() {
 </dict>
 </plist>`, exe)
 
-	err = os.WriteFile(plistPath, []byte(plistContent), 0644)
+	err := os.WriteFile(plistPath, []byte(plistContent), 0644)
 	if err != nil {
 		fmt.Println("\033[31m[FAIL]\033[0m   LaunchAgent write error:", err)
 		return
@@ -150,12 +170,7 @@ func installAgent() {
 	fmt.Println("\033[36m[INFO]\033[0m   Logs: /tmp/autologin.log")
 }
 
-func uninstallAgent() {
-	if runtime.GOOS != "darwin" {
-		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall requires macOS")
-		return
-	}
-
+func uninstallDarwin() {
 	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.fortinet.autologin.plist")
 
 	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
@@ -169,6 +184,69 @@ func uninstallAgent() {
 		fmt.Println("\033[31m[FAIL]\033[0m   Failed to remove LaunchAgent:", err)
 		return
 	}
+
+	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
+}
+
+func installLinux(exe string) {
+	home, _ := os.UserHomeDir()
+	systemdDir := filepath.Join(home, ".config", "systemd", "user")
+	err := os.MkdirAll(systemdDir, 0755)
+	if err != nil {
+		fmt.Println("\033[31m[FAIL]\033[0m   Failed to create systemd user directory:", err)
+		return
+	}
+
+	servicePath := filepath.Join(systemdDir, "fortinet-autologin.service")
+	serviceContent := fmt.Sprintf(`[Unit]
+Description=Fortinet Auto Login Daemon
+After=network-online.target
+
+[Service]
+ExecStart=%s -daemon
+Restart=always
+RestartSec=5
+StandardOutput=append:/tmp/autologin.log
+StandardError=append:/tmp/autologin.err.log
+
+[Install]
+WantedBy=default.target
+`, exe)
+
+	err = os.WriteFile(servicePath, []byte(serviceContent), 0644)
+	if err != nil {
+		fmt.Println("\033[31m[FAIL]\033[0m   Systemd service write error:", err)
+		return
+	}
+
+	exec.Command("systemctl", "--user", "daemon-reload").Run()
+	err = exec.Command("systemctl", "--user", "enable", "--now", "fortinet-autologin.service").Run()
+	if err != nil {
+		fmt.Println("\033[31m[FAIL]\033[0m   Systemd service enable error:", err)
+		return
+	}
+
+	fmt.Println("\033[32m[OK]\033[0m     Installed successfully")
+	fmt.Println("\033[36m[INFO]\033[0m   Background service active (systemd)")
+	fmt.Println("\033[36m[INFO]\033[0m   Logs: /tmp/autologin.log")
+}
+
+func uninstallLinux() {
+	home, _ := os.UserHomeDir()
+	servicePath := filepath.Join(home, ".config", "systemd", "user", "fortinet-autologin.service")
+
+	if _, err := os.Stat(servicePath); os.IsNotExist(err) {
+		fmt.Println("\033[33m[WARN]\033[0m   Service is not installed")
+		return
+	}
+
+	exec.Command("systemctl", "--user", "disable", "--now", "fortinet-autologin.service").Run()
+	err := os.Remove(servicePath)
+	if err != nil {
+		fmt.Println("\033[31m[FAIL]\033[0m   Failed to remove systemd service:", err)
+		return
+	}
+	exec.Command("systemctl", "--user", "daemon-reload").Run()
 
 	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
 }
