@@ -70,7 +70,7 @@ func main() {
 
 	if logoutFlag {
 		if !logout() {
-			logf("\033[31m[ FAIL ]\033[0m   Logout failed")
+			logf("\033[31m[FAIL]\033[0m   Logout failed")
 		}
 		return
 	}
@@ -88,7 +88,7 @@ func main() {
 	success := false
 	for attempt := 1; attempt <= 5; attempt++ {
 		if attempt > 1 {
-			logf("\033[36m[ RETRY ]\033[0m  %d/5", attempt)
+			logf("\033[36m[RETRY]\033[0m  %d/5", attempt)
 		}
 		if login(false, false) {
 			success = true
@@ -97,6 +97,6 @@ func main() {
 		time.Sleep(2 * time.Second)
 	}
 	if !success {
-		logf("\033[31m[ FAIL ]\033[0m   Auth failed")
+		logf("\033[31m[FAIL]\033[0m   Auth failed")
 	}
 }

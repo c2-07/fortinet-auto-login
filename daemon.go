@@ -11,7 +11,7 @@ import (
 // drops (AP switch, sleep/wake, portal timeout) without needing to detect
 // network-change events at the OS level.
 func daemon(interval time.Duration) {
-	logf("\033[36m[ INIT ]\033[0m   Daemon started (interval=%s)", interval)
+	logf("\033[36m[INIT]\033[0m   Daemon started (interval=%s)", interval)
 	for {
 		login(true, false)
 		time.Sleep(interval)
@@ -22,7 +22,7 @@ func runAutoMode() {
 	c, ok := loadCredentials()
 	if !ok {
 		if notifyCredentialsNeeded() {
-			logf("\033[31m[ FAIL ]\033[0m   No creds. Run interactively.")
+			logf("\033[31m[FAIL]\033[0m   No creds. Run interactively.")
 		}
 		return
 	}

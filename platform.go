@@ -89,7 +89,7 @@ func notifyCredentialsNeeded() bool {
 
 func installAgent() {
 	if runtime.GOOS != "darwin" {
-		fmt.Println("\033[31m[ FAIL ]\033[0m   Auto-install requires macOS")
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install requires macOS")
 		return
 	}
 
@@ -100,7 +100,7 @@ func installAgent() {
 
 	exe, err := os.Executable()
 	if err != nil {
-		fmt.Println("\033[31m[ FAIL ]\033[0m   Executable path error:", err)
+		fmt.Println("\033[31m[FAIL]\033[0m   Executable path error:", err)
 		return
 	}
 
@@ -134,41 +134,41 @@ func installAgent() {
 
 	err = os.WriteFile(plistPath, []byte(plistContent), 0644)
 	if err != nil {
-		fmt.Println("\033[31m[ FAIL ]\033[0m   LaunchAgent write error:", err)
+		fmt.Println("\033[31m[FAIL]\033[0m   LaunchAgent write error:", err)
 		return
 	}
 
 	exec.Command("launchctl", "unload", plistPath).Run()
 	err = exec.Command("launchctl", "load", plistPath).Run()
 	if err != nil {
-		fmt.Println("\033[31m[ FAIL ]\033[0m   LaunchAgent load error:", err)
+		fmt.Println("\033[31m[FAIL]\033[0m   LaunchAgent load error:", err)
 		return
 	}
 
-	fmt.Println("\033[32m[ OK ]\033[0m     Installed successfully")
-	fmt.Println("\033[36m[ INFO ]\033[0m   Background service active (event-driven + 5s fallback)")
-	fmt.Println("\033[36m[ INFO ]\033[0m   Logs: /tmp/autologin.log")
+	fmt.Println("\033[32m[OK]\033[0m     Installed successfully")
+	fmt.Println("\033[36m[INFO]\033[0m   Background service active (event-driven + 5s fallback)")
+	fmt.Println("\033[36m[INFO]\033[0m   Logs: /tmp/autologin.log")
 }
 
 func uninstallAgent() {
 	if runtime.GOOS != "darwin" {
-		fmt.Println("\033[31m[ FAIL ]\033[0m   Auto-uninstall requires macOS")
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall requires macOS")
 		return
 	}
 
 	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.fortinet.autologin.plist")
 
 	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
-		fmt.Println("\033[33m[ WARN ]\033[0m   Agent is not installed")
+		fmt.Println("\033[33m[WARN]\033[0m   Agent is not installed")
 		return
 	}
 
 	exec.Command("launchctl", "unload", plistPath).Run()
 	err := os.Remove(plistPath)
 	if err != nil {
-		fmt.Println("\033[31m[ FAIL ]\033[0m   Failed to remove LaunchAgent:", err)
+		fmt.Println("\033[31m[FAIL]\033[0m   Failed to remove LaunchAgent:", err)
 		return
 	}
 
-	fmt.Println("\033[32m[ OK ]\033[0m     Uninstalled successfully")
+	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
 }

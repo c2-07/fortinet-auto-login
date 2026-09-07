@@ -90,25 +90,25 @@ func login(quiet bool, isRetry bool) bool {
 	client := makeClient()
 
 	if !quiet {
-		logf("\033[34m[ NET ]\033[0m    Checking internet (Mozilla method)...")
+		logf("\033[34m[NET]\033[0m    Checking internet (Mozilla method)...")
 	}
 	portal, alreadyConnected, err := getPortal(client)
 	if alreadyConnected {
 		if !quiet {
-			logf("\033[32m[ OK ]\033[0m     Internet connected")
+			logf("\033[32m[OK]\033[0m     Internet connected")
 		}
 		return true
 	}
 	if err != nil || portal == "" {
 		if !quiet {
-			logf("\033[31m[ FAIL ]\033[0m   Network unreachable")
+			logf("\033[31m[FAIL]\033[0m   Network unreachable")
 		}
 		return false
 	}
 
 	if !quiet {
-		logf("\033[33m[ PORTAL ]\033[0m %s", portal)
-		logf("\033[34m[ AUTH ]\033[0m  User: %s", username)
+		logf("\033[33m[PORTAL]\033[0m %s", portal)
+		logf("\033[34m[AUTH]\033[0m  User: %s", username)
 	}
 
 	// Visit the portal first to establish cookies/session.
@@ -174,7 +174,7 @@ func login(quiet bool, isRetry bool) bool {
 	textLower := strings.ToLower(text)
 	if strings.Contains(textLower, "failed") || strings.Contains(textLower, "invalid") {
 		if !quiet {
-			logf("\033[31m[ FAIL ]\033[0m   Login rejected by Fortinet")
+			logf("\033[31m[FAIL]\033[0m   Login rejected by Fortinet")
 		}
 
 		isBadCreds := strings.Contains(textLower, "invalid user") ||
@@ -199,10 +199,10 @@ func login(quiet bool, isRetry bool) bool {
 			if isBadCreds {
 				deleteCredentials()
 				if notifyCredentialsNeeded() {
-					logf("\033[33m[ WARN ]\033[0m   Bad creds deleted. Run manually to update.")
+					logf("\033[33m[WARN]\033[0m   Bad creds deleted. Run manually to update.")
 				}
 			} else {
-				logf("\033[33m[ WARN ]\033[0m   Session error (Not deleting creds).")
+				logf("\033[33m[WARN]\033[0m   Session error (Not deleting creds).")
 			}
 		}
 		return false
@@ -218,14 +218,14 @@ func login(quiet bool, isRetry bool) bool {
 	}
 	saveSession(s)
 
-	logf("\033[32m[ OK ]\033[0m     Auth success (host=%s magic=%s)", s.Host, s.Magic)
+	logf("\033[32m[OK]\033[0m     Auth success (host=%s magic=%s)", s.Host, s.Magic)
 	return true
 }
 
 func logout() bool {
 	s, ok := loadSession()
 	if !ok {
-		logf("\033[33m[ WARN ]\033[0m   No session. Using random magic.")
+		logf("\033[33m[WARN]\033[0m   No session. Using random magic.")
 		s = session{Scheme: fallbackScheme, Host: fallbackHost, Magic: randomMagic()}
 	}
 
@@ -236,17 +236,17 @@ func logout() bool {
 		return http.NewRequest(http.MethodGet, logoutURL, nil)
 	}, 5)
 	if err != nil {
-		logf("\033[31m[ FAIL ]\033[0m   Logout request failed")
+		logf("\033[31m[FAIL]\033[0m   Logout request failed")
 		return false
 	}
 	defer resp.Body.Close()
 	io.Copy(io.Discard, resp.Body)
 
 	if resp.StatusCode != http.StatusOK {
-		logf("\033[31m[ FAIL ]\033[0m   Logout HTTP %d", resp.StatusCode)
+		logf("\033[31m[FAIL]\033[0m   Logout HTTP %d", resp.StatusCode)
 		return false
 	}
-	logf("\033[32m[ OK ]\033[0m     Logged out (host=%s magic=%s)", s.Host, s.Magic)
+	logf("\033[32m[OK]\033[0m     Logged out (host=%s magic=%s)", s.Host, s.Magic)
 	return true
 }
 
@@ -257,10 +257,10 @@ func logout() bool {
 func keepalive() {
 	s, ok := loadSession()
 	if !ok {
-		logf("\033[31m[ FAIL ]\033[0m   No session for keepalive")
+		logf("\033[31m[FAIL]\033[0m   No session for keepalive")
 		return
 	}
-	logf("\033[36m[ INIT ]\033[0m   Keepalive (host=%s magic=%s timeout=%ds)", s.Host, s.Magic, s.Countdown)
+	logf("\033[36m[INIT]\033[0m   Keepalive (host=%s magic=%s timeout=%ds)", s.Host, s.Magic, s.Countdown)
 
 	client := makeClient()
 
@@ -276,19 +276,19 @@ func keepalive() {
 			return http.NewRequest(http.MethodGet, keepaliveURL, nil)
 		}, 5)
 		if err != nil {
-			logf("\033[31m[ FAIL ]\033[0m   Keepalive err: %v", err)
+			logf("\033[31m[FAIL]\033[0m   Keepalive err: %v", err)
 			return
 		}
 
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			logf("\033[31m[ FAIL ]\033[0m   Keepalive read err")
+			logf("\033[31m[FAIL]\033[0m   Keepalive read err")
 			return
 		}
 
 		s.Countdown = extractCountdown(string(body))
 		saveSession(s)
-		logf("\033[32m[ OK ]\033[0m     Keepalive (reset=%ds)", s.Countdown)
+		logf("\033[32m[OK]\033[0m     Keepalive (reset=%ds)", s.Countdown)
 	}
 }

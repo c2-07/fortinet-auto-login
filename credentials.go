@@ -70,7 +70,7 @@ func promptCredentials() credentials {
 	passBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
 	if err != nil {
 		fmt.Println()
-		logf("\033[31m[ ERR ]\033[0m    Password read failed: %v", err)
+		logf("\033[31m[ERR]\033[0m    Password read failed: %v", err)
 		os.Exit(1)
 	}
 	fmt.Println()
@@ -90,7 +90,7 @@ func initCredentials(usernameFlag, passwordFlag string) {
 	}
 
 	if usernameFlag != "" || passwordFlag != "" {
-		fmt.Println("\033[31m[ ERR ]\033[0m    -username and -password require each other")
+		fmt.Println("\033[31m[ERR]\033[0m    -username and -password require each other")
 		os.Exit(1)
 	}
 
