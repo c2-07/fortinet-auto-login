@@ -5,7 +5,6 @@ captive portals (the kind that show a browser popup asking for username/password
 and a "keepalive" window that has to stay open). Written in Go, no external
 dependencies, cross-compiles for macOS/Linux/Windows.
 
-<!-- ![Demo](docs/screenshots/demo.gif) -->
 <img width="3140" height="2046" alt="image" src="https://github.com/user-attachments/assets/c255bf52-f1a3-4ce1-899a-0fe378ac7311" />
 
 
@@ -23,7 +22,6 @@ tool:
 4. Optionally runs forever as a background daemon, transparently
    re-authenticating whenever the session drops.
 
-<!-- ![Login flow](docs/screenshots/login-flow.png) -->
 
 ## Installation
 
@@ -72,9 +70,12 @@ GOOS=windows GOARCH=amd64 go build -o autologin.exe .
 | `-keepalive` | `-k`      | `false` | Keep the current session alive (blocking loop)        |
 | `-daemon`    | `-d`      | `false` | Run forever, auto re-login whenever the session drops |
 | `-interval`  | `-i`      | `45s`   | Poll interval for `-daemon`                           |
+| `-install`   |           | `false` | Install macOS LaunchAgent for background execution    |
+| `-uninstall` |           | `false` | Uninstall macOS LaunchAgent                           |
+| `-auto`      |           | `false` | Run once automatically (used by background jobs)      |
 | `-version`   | `-v`      | `false` | Print version information and exit                    |
 
-The tool uses a secure persistent credential cache. When you run it for the first time without flags, it will interactively prompt you for your username and password, which are then saved in `$XDG_CACHE_HOME/captive-portal-credentials.json` with secure permissions (`0600`). You can also supply `-u` and `-p` flags explicitly to provide or update these credentials without editing the source.
+The tool uses a secure persistent credential cache. When you run it for the first time without flags, it will interactively prompt you for your username and password, which are then saved securely in `~/.fortinet-autologin/credentials.json` with secure permissions (`0600`). You can also supply `-u` and `-p` flags explicitly to provide or update these credentials without editing the source.
 
 ### Examples
 
@@ -96,57 +97,31 @@ Log out of the current session:
 ./autologin -logout
 ```
 
-Run as a persistent background daemon (recommended for day-to-day use — see
-[Running automatically](#running-automatically-macoswindows) below):
+Run as a persistent background daemon:
 
 ```bash
 ./autologin -d -i 30s
 ```
 
-Keep the current session alive without a daemon loop:
-
-```bash
-./autologin -k
-```
-
-<!-- ![CLI output](docs/screenshots/cli-output.png) -->
-
-## Running automatically (macOS/Windows)
+## Running automatically in the background
 
 Rather than reacting to Wi-Fi connect/disconnect events (fragile on both
 OSes), the daemon just polls every `-interval` and no-ops instantly if
 already connected, re-authenticating only when the session actually drops.
 
-### macOS — LaunchAgent
+### macOS
 
-Save as `~/Library/LaunchAgents/com.yourname.autologin.plist`:
+We provide a built-in command to easily install a background macOS `LaunchAgent` that automatically logs you in whenever you connect to Wi-Fi.
 
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.yourname.autologin</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/path/to/autologin</string>
-        <string>-daemon</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/autologin.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/autologin.err.log</string>
-</dict>
-</plist>
-```
-
+Simply run:
 ```bash
-launchctl load ~/Library/LaunchAgents/com.yourname.autologin.plist
+./autologin -install
+```
+This will set up the agent to automatically re-authenticate in the background! Logs are written to `/tmp/autologin.log`.
+
+To remove the background service at any time:
+```bash
+./autologin -uninstall
 ```
 
 ### Windows — Scheduled Task
@@ -158,13 +133,9 @@ $settings = New-ScheduledTaskSettingsSet -Hidden -RestartCount 999 -RestartInter
 Register-ScheduledTask -TaskName "AutoLogin-WiFi" -Action $action -Trigger $trigger -Settings $settings -RunLevel Limited
 ```
 
-<!-- ![LaunchAgent setup](docs/screenshots/launchagent.png) -->
-<!-- ![Task Scheduler setup](docs/screenshots/task-scheduler.png) -->
-
 ## Notes
 
-- Session state (host, magic, countdown) is cached at
-  `$XDG_CACHE_HOME/captive-portal-session.json` (or the OS equivalent).
+- Session state (host, magic, countdown) and credentials are automatically cached in `~/.fortinet-autologin/`.
 - `-logout` falls back to a randomly generated magic against a default
   gateway if no cached session exists — the portal doesn't validate the
   magic against the actual session, so this still works.

@@ -157,7 +157,7 @@ func uninstallAgent() {
 	}
 
 	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.fortinet.autologin.plist")
-	
+
 	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
 		fmt.Println("\033[33m[ WARN ]\033[0m   Agent is not installed")
 		return

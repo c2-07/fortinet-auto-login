@@ -212,17 +212,17 @@ func TestServiceMode(t *testing.T) {
 	// Test Uninstallation
 	cmdUninstall := exec.Command(binPath, "-uninstall")
 	cmdUninstall.Env = append(os.Environ(), "HOME="+fakeHome)
-	
+
 	var stdoutUninstall bytes.Buffer
 	cmdUninstall.Stdout = &stdoutUninstall
 	cmdUninstall.Stderr = &stdoutUninstall
-	
+
 	cmdUninstall.Run()
 
 	if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
 		t.Fatalf("LaunchAgent plist was not removed after -uninstall\nOutput: %s", stdoutUninstall.String())
 	}
-	
+
 	if !strings.Contains(stdoutUninstall.String(), "Uninstalled successfully") {
 		t.Errorf("Expected success message, got: %s", stdoutUninstall.String())
 	}

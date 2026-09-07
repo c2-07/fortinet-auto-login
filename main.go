@@ -37,7 +37,7 @@ func main() {
 
 	var autoFlag bool
 	flag.BoolVar(&autoFlag, "auto", false, "run once automatically (for background jobs, checks SSID)")
-	
+
 	var installFlag bool
 	flag.BoolVar(&installFlag, "install", false, "install macOS LaunchAgent for event-driven background execution")
 

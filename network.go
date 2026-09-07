@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	checkURL        = "http://detectportal.firefox.com/"
+	checkURL = "http://detectportal.firefox.com/"
 
 	// Fallback gateway used for logout when no saved session exists — e.g.
 	// the script never ran login in this environment, or the cache was
@@ -176,12 +176,12 @@ func login(quiet bool, isRetry bool) bool {
 		if !quiet {
 			logf("\033[31m[ FAIL ]\033[0m   Login rejected by Fortinet")
 		}
-		
-		isBadCreds := strings.Contains(textLower, "invalid user") || 
-					  strings.Contains(textLower, "invalid pass") ||
-					  strings.Contains(textLower, "authentication failed") ||
-					  strings.Contains(textLower, "login failed") ||
-					  strings.Contains(textLower, "wrong")
+
+		isBadCreds := strings.Contains(textLower, "invalid user") ||
+			strings.Contains(textLower, "invalid pass") ||
+			strings.Contains(textLower, "authentication failed") ||
+			strings.Contains(textLower, "login failed") ||
+			strings.Contains(textLower, "wrong")
 
 		if !isRetry && !quiet {
 			// For manual interactive runs, we can prompt again if it seems like a typo.
@@ -194,7 +194,7 @@ func login(quiet bool, isRetry bool) bool {
 				return login(quiet, true)
 			}
 		}
-		
+
 		if quiet {
 			if isBadCreds {
 				deleteCredentials()

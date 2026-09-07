@@ -51,16 +51,16 @@ func TestRandomMagic(t *testing.T) {
 }
 
 func TestCredentialsSaveAndLoad(t *testing.T) {
-	// Create a temporary directory to act as XDG_CACHE_HOME
+	// Create a temporary directory to act as HOME
 	tempDir, err := os.MkdirTemp("", "fortinet-test-*")
 	if err != nil {
 		t.Fatalf("failed to create temp dir: %v", err)
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Set XDG_CACHE_HOME so credentialsFilePath() uses it
-	os.Setenv("XDG_CACHE_HOME", tempDir)
-	defer os.Unsetenv("XDG_CACHE_HOME")
+	// Set HOME so credentialsFilePath() uses it
+	os.Setenv("HOME", tempDir)
+	defer os.Unsetenv("HOME")
 
 	// 1. Initially, no credentials should exist
 	_, ok := loadCredentials()
