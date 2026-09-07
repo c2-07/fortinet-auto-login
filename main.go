@@ -350,19 +350,39 @@ func login(quiet bool, isRetry bool) bool {
 	}
 	text := string(body)
 
-	if strings.Contains(text, "Failed") || strings.Contains(text, "Invalid") {
-		logf("\033[31m[ FAIL ]\033[0m   Invalid credentials")
-		if !isRetry && !quiet {
-			deleteCredentials()
-			c := promptCredentials()
-			username = c.Username
-			password = c.Password
-			return login(quiet, true)
+	textLower := strings.ToLower(text)
+	if strings.Contains(textLower, "failed") || strings.Contains(textLower, "invalid") {
+		if !quiet {
+			logf("\033[31m[ FAIL ]\033[0m   Login rejected by Fortinet")
 		}
+		
+		isBadCreds := strings.Contains(textLower, "invalid user") || 
+					  strings.Contains(textLower, "invalid pass") ||
+					  strings.Contains(textLower, "authentication failed") ||
+					  strings.Contains(textLower, "login failed") ||
+					  strings.Contains(textLower, "wrong")
+
+		if !isRetry && !quiet {
+			// For manual interactive runs, we can prompt again if it seems like a typo.
+			// But to be safe, only prompt if it's explicitly a bad password.
+			if isBadCreds {
+				deleteCredentials()
+				c := promptCredentials()
+				username = c.Username
+				password = c.Password
+				return login(quiet, true)
+			}
+		}
+		
 		if quiet {
-			deleteCredentials()
-			logf("Invalid credentials deleted. Run './autologin' in terminal to enter new ones.")
-			notifyCredentialsNeeded()
+			if isBadCreds {
+				deleteCredentials()
+				if notifyCredentialsNeeded() {
+					logf("\033[33m[ WARN ]\033[0m   Bad creds deleted. Run manually to update.")
+				}
+			} else {
+				logf("\033[33m[ WARN ]\033[0m   Session error (Not deleting creds).")
+			}
 		}
 		return false
 	}
