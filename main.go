@@ -446,6 +446,25 @@ func keepalive() {
 			return
 		}
 
+		s.Countdown = extractCountdown(string(body))
+		saveSession(s)
+		logf("\033[32m[ OK ]\033[0m     Keepalive (reset=%ds)", s.Countdown)
+	}
+}
+
+// daemon runs forever, polling login() at a fixed interval. login() already
+// short-circuits fast when already connected, so this is cheap while
+// connected and will transparently re-authenticate whenever the session
+// drops (AP switch, sleep/wake, portal timeout) without needing to detect
+// network-change events at the OS level.
+func daemon(interval time.Duration) {
+	logf("\033[36m[ INIT ]\033[0m   Daemon started (interval=%s)", interval)
+	for {
+		login(true, false)
+		time.Sleep(interval)
+	}
+}
+
 func getCurrentSSID() (string, error) {
 	if runtime.GOOS == "windows" {
 		out, _ := exec.Command("cmd", "/c", "netsh wlan show interfaces | findstr SSID").Output()
@@ -623,25 +642,6 @@ func installAgent() {
 	fmt.Println("\033[36m[ INFO ]\033[0m   Logs: /tmp/autologin.log")
 }
 
-		s.Countdown = extractCountdown(string(body))
-		saveSession(s)
-		logf("\033[32m[ OK ]\033[0m     Keepalive (reset=%ds)", s.Countdown)
-	}
-}
-
-// daemon runs forever, polling login() at a fixed interval. login() already
-// short-circuits fast when already connected, so this is cheap while
-// connected and will transparently re-authenticate whenever the session
-// drops (AP switch, sleep/wake, portal timeout) without needing to detect
-// network-change events at the OS level.
-func daemon(interval time.Duration) {
-	logf("\033[36m[ INIT ]\033[0m   Daemon started (interval=%s)", interval)
-	for {
-		login(true, false)
-		time.Sleep(interval)
-	}
-}
-
 func main() {
 	var usernameFlag, passwordFlag string
 	flag.StringVar(&usernameFlag, "username", "", "portal username")
@@ -665,10 +665,26 @@ func main() {
 	flag.BoolVar(&versionFlag, "version", false, "print version information and exit")
 	flag.BoolVar(&versionFlag, "v", false, "shorthand for -version")
 
+	var autoFlag bool
+	flag.BoolVar(&autoFlag, "auto", false, "run once automatically (for background jobs, checks SSID)")
+	
+	var installFlag bool
+	flag.BoolVar(&installFlag, "install", false, "install macOS LaunchAgent for event-driven background execution")
+
 	flag.Parse()
 
 	if versionFlag {
 		fmt.Printf("fortinet-auto-login %s, commit %s, built at %s\n", version, commit, date)
+		return
+	}
+
+	if installFlag {
+		installAgent()
+		return
+	}
+
+	if autoFlag {
+		runAutoMode()
 		return
 	}
 
