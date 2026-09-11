@@ -358,7 +358,15 @@ func viewLogs() {
 	
 	content, err := os.ReadFile(logPath)
 	if err != nil {
-		fmt.Printf("\033[31m[FAIL]\033[0m   Could not read logs: %v\n", err)
+		if os.IsNotExist(err) {
+			fmt.Printf("\033[33m[INFO]\033[0m   No logs found yet. The background task might not have started or hasn't printed anything.\n")
+		} else {
+			fmt.Printf("\033[31m[FAIL]\033[0m   Could not read logs: %v\n", err)
+		}
+		return
+	}
+	if len(content) == 0 {
+		fmt.Printf("\033[33m[INFO]\033[0m   Log file is empty.\n")
 		return
 	}
 	fmt.Print(string(content))
