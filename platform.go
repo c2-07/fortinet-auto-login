@@ -261,12 +261,48 @@ func uninstallLinux() {
 }
 
 func installWindows(exe string) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		fmt.Println("\033[31m[FAIL]\033[0m   Failed to get user home directory:", err)
+		return
+	}
+
+	targetDir := filepath.Join(home, "local", "bin", "autologin")
+	err = os.MkdirAll(targetDir, 0755)
+	if err != nil {
+		fmt.Println("\033[31m[FAIL]\033[0m   Failed to create directory:", err)
+		return
+	}
+
+	targetExe := filepath.Join(targetDir, "autologin.exe")
+	if exe != targetExe {
+		input, err := os.ReadFile(exe)
+		if err != nil {
+			fmt.Println("\033[31m[FAIL]\033[0m   Failed to read executable:", err)
+			return
+		}
+		err = os.WriteFile(targetExe, input, 0755)
+		if err != nil {
+			fmt.Println("\033[31m[FAIL]\033[0m   Failed to write executable to target:", err)
+			return
+		}
+	}
+
+	pathScript := fmt.Sprintf(`
+$targetDir = "%s"
+$path = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($path -notmatch [regex]::Escape($targetDir)) {
+    [Environment]::SetEnvironmentVariable("Path", $path + ";" + $targetDir, "User")
+}
+`, targetDir)
+	exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", pathScript).Run()
+
 	script := fmt.Sprintf(`
 $action = New-ScheduledTaskAction -Execute "%s" -Argument "-daemon"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -Hidden -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0
 Register-ScheduledTask -TaskName "FortinetAutoLogin" -Action $action -Trigger $trigger -Settings $settings -Force
-`, exe)
+`, targetExe)
 
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	out, err := cmd.CombinedOutput()
@@ -282,12 +318,30 @@ Register-ScheduledTask -TaskName "FortinetAutoLogin" -Action $action -Trigger $t
 }
 
 func uninstallWindows() {
-	script := `Unregister-ScheduledTask -TaskName "FortinetAutoLogin" -Confirm:$false`
+	script := `
+Stop-ScheduledTask -TaskName "FortinetAutoLogin" -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName "FortinetAutoLogin" -Confirm:$false -ErrorAction SilentlyContinue
+`
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to remove Scheduled Task: %v\nOutput: %s\n", err, string(out))
-		return
+	cmd.Run() // Ignore errors if the task doesn't exist
+
+	home, err := os.UserHomeDir()
+	if err == nil {
+		targetDir := filepath.Join(home, "local", "bin", "autologin")
+		
+		// Remove directory and executable
+		os.RemoveAll(targetDir)
+
+		// Remove from User PATH
+		pathScript := fmt.Sprintf(`
+$targetDir = "%s"
+$path = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($path -match [regex]::Escape($targetDir)) {
+    $newPath = ($path -split ';' | Where-Object { $_ -ne $targetDir -and $_ -ne "" }) -join ';'
+    [Environment]::SetEnvironmentVariable("Path", $newPath, "User")
+}
+`, targetDir)
+		exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", pathScript).Run()
 	}
 
 	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
