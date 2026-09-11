@@ -297,12 +297,13 @@ if ($path -notmatch [regex]::Escape($targetDir)) {
 `, targetDir)
 	exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", pathScript).Run()
 
+	logPath := filepath.Join(os.TempDir(), "autologin.log")
 	script := fmt.Sprintf(`
-$action = New-ScheduledTaskAction -Execute "%s" -Argument "-daemon"
+$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument '/c "%s" -daemon >> "%s" 2>&1'
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -Hidden -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0
 Register-ScheduledTask -TaskName "FortinetAutoLogin" -Action $action -Trigger $trigger -Settings $settings -Force
-`, targetExe)
+`, targetExe, logPath)
 
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	out, err := cmd.CombinedOutput()
@@ -345,4 +346,20 @@ if ($path -match [regex]::Escape($targetDir)) {
 	}
 
 	fmt.Println("\033[32m[OK]\033[0m     Uninstalled successfully")
+}
+
+func viewLogs() {
+	var logPath string
+	if runtime.GOOS == "windows" {
+		logPath = filepath.Join(os.TempDir(), "autologin.log")
+	} else {
+		logPath = "/tmp/autologin.log"
+	}
+	
+	content, err := os.ReadFile(logPath)
+	if err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Could not read logs: %v\n", err)
+		return
+	}
+	fmt.Print(string(content))
 }

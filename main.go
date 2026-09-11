@@ -44,6 +44,9 @@ func main() {
 	var uninstallFlag bool
 	flag.BoolVar(&uninstallFlag, "uninstall", false, "uninstall macOS LaunchAgent")
 
+	var logsFlag bool
+	flag.BoolVar(&logsFlag, "logs", false, "view background task logs")
+
 	flag.Parse()
 
 	if versionFlag {
@@ -58,6 +61,11 @@ func main() {
 
 	if uninstallFlag {
 		uninstallAgent()
+		return
+	}
+
+	if logsFlag {
+		viewLogs()
 		return
 	}
 
