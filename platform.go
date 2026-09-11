@@ -297,13 +297,12 @@ if ($path -notmatch [regex]::Escape($targetDir)) {
 `, targetDir)
 	exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", pathScript).Run()
 
-	logPath := filepath.Join(os.TempDir(), "autologin.log")
 	script := fmt.Sprintf(`
-$action = New-ScheduledTaskAction -Execute "cmd.exe" -Argument '/c "%s" -daemon >> "%s" 2>&1'
+$action = New-ScheduledTaskAction -Execute "%s" -Argument "-daemon"
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 $settings = New-ScheduledTaskSettingsSet -Hidden -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -ExecutionTimeLimit 0
 Register-ScheduledTask -TaskName "FortinetAutoLogin" -Action $action -Trigger $trigger -Settings $settings -Force
-`, targetExe, logPath)
+`, targetExe)
 
 	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", script)
 	out, err := cmd.CombinedOutput()

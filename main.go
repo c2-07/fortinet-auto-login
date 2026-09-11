@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -89,6 +92,13 @@ func main() {
 	}
 
 	if daemonFlag {
+		if runtime.GOOS == "windows" {
+			logPath := filepath.Join(os.TempDir(), "autologin.log")
+			f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+			if err == nil {
+				logOut = f
+			}
+		}
 		daemon(intervalFlag)
 		return
 	}
