@@ -1,1 +1,16 @@
+# Binaries
 autologin
+*.exe
+test
+
+# Logs and temp files
+*.log
+c.txt
+
+# OS and IDE
+.DS_Store
+.idea/
+.vscode/
+
+# Go test binaries
+*.test
