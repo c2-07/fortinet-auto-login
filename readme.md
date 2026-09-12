@@ -70,8 +70,9 @@ GOOS=windows GOARCH=amd64 go build -o autologin.exe .
 | `-keepalive` | `-k`      | `false` | Keep the current session alive (blocking loop)        |
 | `-daemon`    | `-d`      | `false` | Run forever, auto re-login whenever the session drops |
 | `-interval`  | `-i`      | `45s`   | Poll interval for `-daemon`                           |
-| `-install`   |           | `false` | Install macOS LaunchAgent for background execution    |
-| `-uninstall` |           | `false` | Uninstall macOS LaunchAgent                           |
+| `-install`   |           | `false` | Install background agent (macOS/Linux)                |
+| `-uninstall` |           | `false` | Uninstall background agent (macOS/Linux)              |
+| `-logs`      |           | `false` | View background daemon logs                           |
 | `-auto`      |           | `false` | Run once automatically (used by background jobs)      |
 | `-version`   | `-v`      | `false` | Print version information and exit                    |
 
@@ -109,9 +110,9 @@ Rather than reacting to Wi-Fi connect/disconnect events (fragile on both
 OSes), the daemon just polls every `-interval` and no-ops instantly if
 already connected, re-authenticating only when the session actually drops.
 
-### macOS, Linux, and Windows
+### macOS and Linux
 
-We provide a built-in command to easily install a background service (`LaunchAgent` on macOS, `systemd` on Linux, and `Scheduled Task` on Windows) that automatically logs you in whenever you connect to Wi-Fi.
+We provide a built-in command to easily install a background service (`LaunchAgent` on macOS, and `systemd` on Linux) that automatically logs you in whenever you connect to Wi-Fi.
 
 Simply run:
 ```bash
