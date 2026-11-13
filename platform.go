@@ -1,12 +1,15 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 )
 
 func getCurrentSSID() (string, error) {
@@ -258,26 +261,85 @@ func uninstallLinux() {
 
 
 
-func viewLogs() {
-	var logPath string
-	if runtime.GOOS == "windows" {
-		logPath = filepath.Join(os.TempDir(), "autologin.log")
-	} else {
-		logPath = "/tmp/autologin.log"
-	}
-	
-	content, err := os.ReadFile(logPath)
+func clearLogs() {
+	logPath := getLogFilePath()
+	err := os.WriteFile(logPath, []byte(""), 0644)
 	if err != nil {
-		if os.IsNotExist(err) {
-			fmt.Printf("\033[33m[INFO]\033[0m   No logs found yet. The background task might not have started or hasn't printed anything.\n")
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to clear logs: %v\n", err)
+		return
+	}
+	fmt.Printf("\033[32m[OK]\033[0m     Logs cleared (%s)\n", logPath)
+}
+
+func viewLogs(follow bool, linesCount int) {
+	logPath := getLogFilePath()
+
+	if !follow {
+		content, err := os.ReadFile(logPath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				fmt.Printf("\033[33m[INFO]\033[0m   No logs found yet. The background task might not have started or hasn't printed anything.\n")
+			} else {
+				fmt.Printf("\033[31m[FAIL]\033[0m   Could not read logs: %v\n", err)
+			}
+			return
+		}
+		if len(content) == 0 {
+			fmt.Printf("\033[33m[INFO]\033[0m   Log file is empty (%s).\n", logPath)
+			return
+		}
+
+		lines := strings.Split(strings.TrimRight(string(content), "\r\n"), "\n")
+		start := 0
+		if linesCount > 0 && len(lines) > linesCount {
+			start = len(lines) - linesCount
+			fmt.Printf("\033[36m[LOGS]\033[0m   Showing last %d lines of %s:\n", linesCount, logPath)
 		} else {
-			fmt.Printf("\033[31m[FAIL]\033[0m   Could not read logs: %v\n", err)
+			fmt.Printf("\033[36m[LOGS]\033[0m   Showing all %d lines of %s:\n", len(lines), logPath)
+		}
+		for _, l := range lines[start:] {
+			fmt.Println(l)
 		}
 		return
 	}
-	if len(content) == 0 {
-		fmt.Printf("\033[33m[INFO]\033[0m   Log file is empty.\n")
+
+	// Follow / streaming mode (tail -f)
+	fmt.Printf("\033[36m[LOGS]\033[0m   Streaming %s (Press Ctrl+C to exit)...\n", logPath)
+
+	file, err := os.Open(logPath)
+	if err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Could not open log file: %v\n", err)
 		return
 	}
-	fmt.Print(string(content))
+	defer file.Close()
+
+	// Print last 20 lines first
+	content, _ := os.ReadFile(logPath)
+	if len(content) > 0 {
+		lines := strings.Split(strings.TrimRight(string(content), "\r\n"), "\n")
+		start := 0
+		if len(lines) > 20 {
+			start = len(lines) - 20
+		}
+		for _, l := range lines[start:] {
+			fmt.Println(l)
+		}
+	}
+
+	// Seek to end of file
+	_, _ = file.Seek(0, io.SeekEnd)
+	reader := bufio.NewReader(file)
+
+	for {
+		line, err := reader.ReadString('\n')
+		if err == nil {
+			fmt.Print(line)
+			continue
+		}
+		if err == io.EOF {
+			time.Sleep(250 * time.Millisecond)
+			continue
+		}
+		break
+	}
 }
