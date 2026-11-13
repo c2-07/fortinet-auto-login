@@ -12,8 +12,29 @@ import (
 // network-change events at the OS level.
 func daemon(interval time.Duration) {
 	logf("\033[36m[INIT]\033[0m   Daemon started (interval=%s)", interval)
+
+	// Rotate log if it exceeded cap
+	rotateLogIfNeeded()
+
+	var wasFortinet bool
 	for {
-		login(true, false)
+		det := DetectFortinetNetwork()
+		if det.IsFortinetNetwork {
+			if !wasFortinet {
+				if det.DeviceSerialNumber != "" {
+					logf("\033[32m[NET]\033[0m    Fortinet network detected (device=%s, gateway=%s)", det.DeviceSerialNumber, det.GatewayIP)
+				} else {
+					logf("\033[32m[NET]\033[0m    Fortinet network detected (portal=%s)", det.CaptivePortalHost)
+				}
+				wasFortinet = true
+			}
+			login(true, false)
+		} else {
+			if wasFortinet {
+				logf("\033[33m[WARN]\033[0m   Left Fortinet network. Monitoring...")
+				wasFortinet = false
+			}
+		}
 		time.Sleep(interval)
 	}
 }
@@ -28,6 +49,13 @@ func runAutoMode() {
 	}
 	username = c.Username
 	password = c.Password
+
+	// Check if we are on a Fortinet network using our primary detection engine
+	det := DetectFortinetNetwork()
+	if !det.IsFortinetNetwork {
+		// Not a Fortinet network, skip authentication attempt
+		return
+	}
 
 	if c.SSID != "" {
 		current, err := getCurrentSSID()
