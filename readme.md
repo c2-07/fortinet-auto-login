@@ -70,21 +70,21 @@ GOOS=linux GOARCH=amd64 go build -o autologin-linux .
 autologin [flags]
 ```
 
-| Flag | Shorthand | Default | Description |
-| --- | --- | --- | --- |
-| `-username` | `-u` | | Portal username (saved to credentials) |
-| `-password` | `-p` | | Portal password (saved to credentials) |
-| `-logout` | `-l` | `false` | Log out of the current captive portal session |
-| `-keepalive` | `-k` | `false` | Keep session alive in a blocking loop |
-| `-daemon` | `-d` | `false` | Run continuous polling daemon |
-| `-interval` | `-i` | `45s` | Polling interval for `-daemon` |
-| `-install` | | `false` | Install macOS LaunchAgent background service |
-| `-uninstall` | | `false` | Uninstall macOS LaunchAgent background service |
-| `-logs` | | `false` | View recent background daemon logs |
-| `-auto` | | `false` | Run once automatically (used by background jobs) |
-| `-detect` | | `false` | Detect Fortinet presence and captive portal on network |
-| `-upgrade` | | `false` | Check for and install the latest release from GitHub |
-| `-version` | `-v` | `false` | Print version information |
+| Flag / Command | Shorthand | Default | Category | Description |
+| --- | --- | --- | --- | --- |
+| *(default)* | | | Auth | Authenticate / login to captive portal |
+| `-u`, `-p` | `-username`, `-password` | | Auth | Provide or update stored portal credentials |
+| `-logout` | `-l` | `false` | Auth | Log out of active captive portal session |
+| `-status` | `-detect` | `false` | Diagnostic | Inspect internet, Fortinet hardware signature & active session |
+| `-service <action>` | | | Service | Manage background service: `install` or `uninstall` |
+| `-daemon` | `-d` | `false` | Daemon | Run continuous monitoring daemon in foreground |
+| `-interval` | `-i` | `45s` | Daemon | Polling interval for daemon |
+| `-logs` | | `false` | Logs | View recent background daemon logs (last 40 lines) |
+| `-logs -f` | `-follow` | `false` | Logs | Live stream / follow logs in real time (like `tail -f`) |
+| `-logs -clear` | `-clean` | `false` | Logs | Truncate and clear background log file |
+| `-n <count>` | | `40` | Logs | Specify number of log lines to show (0 for all) |
+| `-upgrade` | | `false` | Maintenance | Download & atomically update binary from GitHub |
+| `-version` | `-v` | `false` | Info | Print version information |
 
 ### Examples
 
