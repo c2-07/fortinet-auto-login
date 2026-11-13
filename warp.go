@@ -91,6 +91,9 @@ func preflightProbe(endpoint string) bool {
 // 5. Connects and verifies healthy bidirectional status
 func FixAndConnectWarp() bool {
 	logf("\033[36m[WARP]\033[0m   Initializing intelligent Cloudflare WARP auto-rotation...")
+	logf("\033[36m[INFO]\033[0m   Troubleshooting hint for Windows / macOS / Linux:")
+	logf("         If WARP stalls or freezes, toggle Wi-Fi OFF and ON in system settings.")
+	logf("         This resets your network adapter and gets a fresh DHCP lease, clearing Fortinet's temporary UDP blackhole penalty.")
 
 	_, err := exec.LookPath("warp-cli")
 	if err != nil {
@@ -167,7 +170,8 @@ func FixAndConnectWarp() bool {
 
 	_ = exec.Command("warp-cli", "disconnect").Run()
 	logf("\033[31m[FAIL]\033[0m   Unable to connect. Tunnel safely disconnected to prevent network freeze.")
-	logf("\033[33m[TIP]\033[0m    Toggle Wi-Fi off and on once to refresh your DHCP IP and clear Fortinet penalty.")
+	logf("\033[36m[INFO]\033[0m   Try toggling Wi-Fi OFF and back ON in your OS settings (Windows, macOS, or Linux).")
+	logf("         This resets your DHCP lease, clears the FortiGate firewall block, and allows a clean reconnection.")
 	return false
 }
 

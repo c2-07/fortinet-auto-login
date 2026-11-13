@@ -97,6 +97,8 @@ To disconnect and restore normal routing:
 ./autologin -warp-disconnect
 ```
 
+> **Note (Windows, macOS, Linux):** If WARP stalls or your connection freezes, briefly toggle Wi-Fi OFF and ON in your operating system's settings. This forces a DHCP lease renewal, clears the FortiGate firewall's UDP session tracking penalties, and grants a clean state.
+
 ---
 
 ## Security & Storage
