@@ -1,48 +1,75 @@
-use std::error::Error;
-use std::time::Duration;
+use std::thread;
+use std::time::{Duration, SystemTime};
 
 use regex::Regex;
 use ureq::config::Config;
 use ureq::tls::TlsConfig;
 
+use crate::credentials::delete_credentials;
+use crate::error::AppError;
 use crate::logf;
 use crate::session::{clear_session, extract_countdown, load_session, random_magic, save_session};
 use crate::types::Session;
 
-pub const CHECK_URL: &str = "http://detectportal.firefox.com/success.txt";
+pub const CHECK_URL: &str = "http://detectportal.firefox.com/";
 pub const FALLBACK_HOST: &str = "192.168.55.253:1003";
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0 Safari/537.36";
 
 pub fn make_client() -> ureq::Agent {
     let tls_config = TlsConfig::builder().disable_verification(true).build();
     let config = Config::builder()
-        .timeout_global(Some(Duration::from_millis(2500)))
+        .timeout_global(Some(Duration::from_millis(5000)))
         .max_redirects(0)
         .tls_config(tls_config)
         .build();
     config.into()
 }
 
-pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), Box<dyn Error>> {
-    let response = client.get(CHECK_URL).call();
-    match response {
+pub fn do_with_retry<F, T>(retries: usize, mut op: F) -> Result<T, AppError>
+where
+    F: FnMut() -> Result<T, ureq::Error>,
+{
+    let mut last_err = String::new();
+    for attempt in 0..=retries {
+        match op() {
+            Ok(val) => return Ok(val),
+            Err(e) => {
+                last_err = format!("{}", e);
+                if attempt < retries {
+                    let backoff = Duration::from_millis(500 * (attempt as u64 + 1));
+                    thread::sleep(backoff);
+                }
+            }
+        }
+    }
+    Err(AppError::NetworkUnreachable(last_err))
+}
+
+pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), AppError> {
+    let resp = do_with_retry(3, || client.get(CHECK_URL).call());
+
+    match resp {
         Ok(mut res) => {
             let body = res.body_mut().read_to_string().unwrap_or_default();
-            if body.trim() == "success" {
+            let trimmed = body.trim();
+            if trimmed == "success" {
                 return Ok((None, true));
             }
 
-            // Check if body has JavaScript window.location redirect
             if let Some(url) = extract_portal_url(&body) {
                 return Ok((Some(url), false));
             }
 
+            // Also check Location header in case of HTTP redirect
+            if let Some(loc) = res.headers().get("location") {
+                if let Ok(loc_str) = loc.to_str() {
+                    return Ok((Some(loc_str.to_string()), false));
+                }
+            }
+
             Ok((None, false))
         }
-        Err(ureq::Error::StatusCode(code)) if code == 301 || code == 302 || code == 303 || code == 307 => {
-            // Some captive portals return direct HTTP redirect header
-            Ok((None, false))
-        }
-        Err(e) => Err(Box::new(e)),
+        Err(e) => Err(e),
     }
 }
 
@@ -78,7 +105,7 @@ pub fn parse_host_from_url(url_str: &str) -> Option<String> {
     caps.get(1).map(|m| m.as_str().to_string())
 }
 
-pub fn login(quiet: bool, _is_retry: bool, username: &str, password: &str) -> bool {
+pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> bool {
     let client = make_client();
 
     if !quiet {
@@ -114,47 +141,101 @@ pub fn login(quiet: bool, _is_retry: bool, username: &str, password: &str) -> bo
 
     if !quiet {
         logf!("\x1b[33m[PORTAL]\x1b[0m {}", portal_url);
+        logf!("\x1b[34m[AUTH]\x1b[0m   User: {}", username);
     }
 
-    let magic = parse_magic_from_url(&portal_url).unwrap_or_else(random_magic);
+    // Pre-flight GET to the captive portal to initialize session/cookies
+    let preflight = do_with_retry(3, || client.get(&portal_url).call());
+    if preflight.is_err() && !quiet {
+        logf!("\x1b[33m[WARN]\x1b[0m   Pre-flight portal probe failed, proceeding with direct POST...");
+    }
+    thread::sleep(Duration::from_millis(150));
+
+    let magic = parse_magic_from_url(&portal_url).unwrap_or_else(|| {
+        if let Some(pos) = portal_url.find('?') {
+            portal_url[pos + 1..].to_string()
+        } else {
+            random_magic()
+        }
+    });
     let host = parse_host_from_url(&portal_url).unwrap_or_else(|| FALLBACK_HOST.to_string());
 
-    let post_url = if portal_url.contains("/fgtauth") {
-        portal_url.clone()
+    let post_url = if let Some(pos) = portal_url.find('?') {
+        portal_url[..pos].to_string()
     } else {
         format!("https://{}/fgtauth", host)
     };
+    let origin = format!("https://{}", host);
 
     let form_params = [
-        ("4Tredir", "http://detectportal.firefox.com/success.txt"),
+        ("4Tredir", "http://google.com/"),
         ("magic", &magic),
         ("answer", "1"),
         ("username", username),
         ("password", password),
     ];
 
-    let post_res = client
-        .post(&post_url)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:132.0) Gecko/20100101 Firefox/132.0")
-        .send_form(form_params);
+    let post_res = do_with_retry(3, || {
+        client
+            .post(&post_url)
+            .header("Content-Type", "application/x-www-form-urlencoded")
+            .header("Referer", &portal_url)
+            .header("Origin", &origin)
+            .header("User-Agent", USER_AGENT)
+            .send_form(form_params)
+    });
 
     match post_res {
         Ok(mut res) => {
             let body = res.body_mut().read_to_string().unwrap_or_default();
-            let timeout = extract_countdown(&body).unwrap_or(14400);
+            let body_lower = body.to_lowercase();
 
+            if body_lower.contains("failed") || body_lower.contains("invalid") || body_lower.contains("wrong") {
+                if !quiet {
+                    logf!("\x1b[31m[FAIL]\x1b[0m   Login rejected by Fortinet");
+                }
+
+                let is_bad_creds = body_lower.contains("invalid user")
+                    || body_lower.contains("invalid pass")
+                    || body_lower.contains("authentication failed")
+                    || body_lower.contains("login failed")
+                    || body_lower.contains("wrong");
+
+                if is_bad_creds {
+                    delete_credentials();
+                    if !quiet {
+                        logf!("\x1b[33m[WARN]\x1b[0m   Invalid credentials detected. Saved credentials removed.");
+                    }
+                    if !is_retry && !quiet {
+                        let (new_u, new_p) = crate::credentials::prompt_credentials();
+                        let creds = crate::types::Credentials {
+                            username: new_u.clone(),
+                            password: new_p.clone(),
+                            ssid: String::new(),
+                        };
+                        let _ = crate::credentials::save_credentials(&creds);
+                        return login(quiet, true, &new_u, &new_p);
+                    }
+                }
+                return false;
+            }
+
+            let timeout = extract_countdown(&body).unwrap_or(14400);
             let session = Session {
                 host: host.clone(),
                 magic: magic.clone(),
                 timeout,
-                created_at: chrono_now_string(),
+                created_at: SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs()
+                    .to_string(),
                 login_url: portal_url,
             };
             let _ = save_session(&session);
 
             if !quiet {
-                logf!("\x1b[32m[OK]\x1b[0m     Logged in successfully! (Session Timeout: {}s)", timeout);
+                logf!("\x1b[32m[OK]\x1b[0m     Auth success (host={} magic={} timeout={}s)", session.host, session.magic, timeout);
             }
             true
         }
@@ -172,20 +253,20 @@ pub fn logout() -> bool {
     let (host, magic) = match load_session() {
         Some(s) => (s.host, s.magic),
         None => {
-            logf!("\x1b[33m[NOTE]\x1b[0m   No session found. Using random magic on default gateway.");
+            logf!("\x1b[33m[NOTE]\x1b[0m   No session found. Using random magic on fallback gateway.");
             (FALLBACK_HOST.to_string(), random_magic())
         }
     };
 
     let logout_url = format!("https://{}/logout?{}", host, magic);
-    logf!("\x1b[34m[NET]\x1b[0m    Sending logout to: {}", logout_url);
+    logf!("\x1b[34m[NET]\x1b[0m    Sending logout request to: {}", logout_url);
 
-    let res = client.get(&logout_url).call();
+    let res = do_with_retry(3, || client.get(&logout_url).call());
     clear_session();
 
     match res {
         Ok(_) => {
-            logf!("\x1b[32m[OK]\x1b[0m     Logged out successfully");
+            logf!("\x1b[32m[OK]\x1b[0m     Logged out successfully (host={} magic={})", host, magic);
             true
         }
         Err(e) => {
@@ -193,13 +274,4 @@ pub fn logout() -> bool {
             true
         }
     }
-}
-
-fn chrono_now_string() -> String {
-    use std::time::SystemTime;
-    let now = SystemTime::now()
-        .duration_since(SystemTime::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-    format!("{}", now)
 }

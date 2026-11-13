@@ -1,6 +1,8 @@
 mod credentials;
 mod daemon;
 mod detect;
+mod error;
+mod lock;
 mod logger;
 mod network;
 mod platform;
@@ -279,6 +281,14 @@ fn main() {
     }
 
     // 10. Default Login
+    let _lock = match lock::ProcessLock::try_acquire("login") {
+        Ok(l) => Some(l),
+        Err(_) => {
+            logf!("\x1b[33m[NOTE]\x1b[0m   Another autologin process is actively running. Exiting cleanly.");
+            return;
+        }
+    };
+
     let mut success = false;
     for attempt in 1..=5 {
         if attempt > 1 {
@@ -328,5 +338,55 @@ mod tests {
         let m2 = session::random_magic();
         assert_eq!(m1.len(), 16);
         assert_ne!(m1, m2);
+    }
+
+    #[test]
+    fn test_extract_portal_url() {
+        let html = r#"<html><script>window.location="https://192.168.55.253:1003/fgtauth?magic=079c4a9e6abca729";</script></html>"#;
+        let url = network::extract_portal_url(html);
+        assert_eq!(
+            url,
+            Some("https://192.168.55.253:1003/fgtauth?magic=079c4a9e6abca729".to_string())
+        );
+
+        let magic = network::parse_magic_from_url(&url.unwrap());
+        assert_eq!(magic, Some("079c4a9e6abca729".to_string()));
+    }
+
+    #[test]
+    fn test_parse_host_from_url() {
+        let url = "https://192.168.55.253:1003/fgtauth?magic=abc";
+        assert_eq!(network::parse_host_from_url(url), Some("192.168.55.253:1003".to_string()));
+    }
+
+    #[test]
+    fn test_process_lock() {
+        let lock1 = lock::ProcessLock::try_acquire("unit_test");
+        if let Err(ref e) = lock1 {
+            eprintln!("lock1 error: {:?}", e);
+        }
+        assert!(lock1.is_ok());
+
+        // Second lock with same name should fail while lock1 is held
+        let lock2 = lock::ProcessLock::try_acquire("unit_test");
+        assert!(lock2.is_err());
+
+        drop(lock1);
+
+        // After dropping lock1, can acquire again
+        let lock3 = lock::ProcessLock::try_acquire("unit_test");
+        assert!(lock3.is_ok());
+    }
+
+    #[test]
+    fn test_session_expiry() {
+        let expired_session = types::Session {
+            host: "test".to_string(),
+            magic: "123".to_string(),
+            timeout: 100,
+            created_at: "1000000000".to_string(), // In the past
+            login_url: "".to_string(),
+        };
+        assert!(session::is_session_expired(&expired_session));
     }
 }

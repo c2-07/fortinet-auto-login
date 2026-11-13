@@ -55,6 +55,11 @@ pub fn save_credentials(creds: &Credentials) -> io::Result<()> {
     Ok(())
 }
 
+pub fn delete_credentials() {
+    let path = credentials_file_path();
+    let _ = fs::remove_file(path);
+}
+
 pub fn prompt_credentials() -> (String, String) {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
@@ -68,7 +73,7 @@ pub fn prompt_credentials() -> (String, String) {
     print!("Enter Fortinet Password: ");
     let _ = stdout.flush();
 
-    // Mask password using stty on Unix
+    // Disable terminal echo while typing password on Unix
     #[cfg(unix)]
     {
         let _ = Command::new("stty").arg("-echo").status();

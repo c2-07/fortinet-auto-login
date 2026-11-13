@@ -1,4 +1,4 @@
-use std::net::TcpStream;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -86,10 +86,12 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
     }
 
     for target in &gateway_candidates {
-        // Quick TCP probe
-        if let Ok(addr) = target.parse() {
-            if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
-                continue;
+        // Quick TCP probe (handles both IP:port and host:port)
+        if let Ok(mut addrs) = target.to_socket_addrs() {
+            if let Some(addr) = addrs.next() {
+                if TcpStream::connect_timeout(&addr, Duration::from_millis(500)).is_err() {
+                    continue;
+                }
             }
         }
 

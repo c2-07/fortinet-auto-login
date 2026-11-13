@@ -33,6 +33,21 @@ pub fn clear_session() {
     let _ = fs::remove_file(path);
 }
 
+#[allow(dead_code)]
+pub fn is_session_expired(session: &Session) -> bool {
+    let created_at_sec: u64 = session.created_at.parse().unwrap_or(0);
+    if created_at_sec == 0 || session.timeout == 0 {
+        return false;
+    }
+    let now = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    // Consider expired 30s before actual timeout
+    now >= created_at_sec + session.timeout.saturating_sub(30)
+}
+
 pub fn extract_countdown(body: &str) -> Option<u64> {
     let patterns = [
         r#"var\s+countdown\s*=\s*(\d+)"#,
