@@ -5,7 +5,9 @@ use std::time::{Duration, Instant};
 
 use regex::Regex;
 
-use crate::network::{get_portal, make_client, parse_host_from_url, parse_magic_from_url, FALLBACK_HOST};
+use crate::network::{
+    get_portal, make_client, parse_host_from_url, parse_magic_from_url, FALLBACK_HOST,
+};
 use crate::session::load_session;
 use crate::types::FortinetDetectionResult;
 
@@ -21,7 +23,10 @@ pub fn invalidate_detection_cache() {
 pub fn get_default_gateway_hint() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
-        if let Ok(output) = Command::new("route").args(["-n", "get", "default"]).output() {
+        if let Ok(output) = Command::new("route")
+            .args(["-n", "get", "default"])
+            .output()
+        {
             let text = String::from_utf8_lossy(&output.stdout);
             for line in text.lines() {
                 let trimmed = line.trim();
@@ -37,7 +42,10 @@ pub fn get_default_gateway_hint() -> Option<String> {
 
     #[cfg(target_os = "linux")]
     {
-        if let Ok(output) = Command::new("ip").args(["route", "show", "default"]).output() {
+        if let Ok(output) = Command::new("ip")
+            .args(["route", "show", "default"])
+            .output()
+        {
             let text = String::from_utf8_lossy(&output.stdout);
             let parts: Vec<&str> = text.split_whitespace().collect();
             for i in 0..parts.len() {
@@ -85,6 +93,8 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
         gateway_candidates.insert(0, format!("{}:1003", gw));
     }
 
+    let serial_re = Regex::new(r"(FG[0-9A-Z]{14})").ok();
+
     for target in &gateway_candidates {
         // Quick TCP probe (handles both IP:port and host:port)
         if let Ok(mut addrs) = target.to_socket_addrs() {
@@ -100,13 +110,16 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
         if let Ok(mut resp) = client.get(&probe_url).call() {
             let body = resp.body_mut().read_to_string().unwrap_or_default();
             let body_lower = body.to_lowercase();
-            if body_lower.contains("fortigate") || body_lower.contains("fortinet") || body.contains("FG6H0") {
+            if body_lower.contains("fortigate")
+                || body_lower.contains("fortinet")
+                || body.contains("FG6H0")
+            {
                 result.is_fortinet_network = true;
                 result.gateway_ip = Some(target.clone());
                 result.detection_method = Some("Gateway TLS Service Signature".to_string());
 
                 // Extract serial number if present
-                if let Ok(re) = Regex::new(r"(FG[0-9A-Z]{14})") {
+                if let Some(ref re) = serial_re {
                     if let Some(caps) = re.captures(&body) {
                         if let Some(m) = caps.get(1) {
                             result.device_serial_number = Some(m.as_str().to_string());

@@ -1,6 +1,6 @@
 use serde::Deserialize;
-use ureq::config::Config;
 use std::time::Duration;
+use ureq::config::Config;
 
 use crate::logf;
 
@@ -14,7 +14,10 @@ struct GitHubRelease {
 }
 
 pub fn check_upgrade() -> bool {
-    logf!("\x1b[36m[UPGRADE]\x1b[0m Checking for updates (current version: v{})...", CURRENT_VERSION);
+    logf!(
+        "\x1b[36m[UPGRADE]\x1b[0m Checking for updates (current version: v{})...",
+        CURRENT_VERSION
+    );
 
     let config = Config::builder()
         .timeout_global(Some(Duration::from_secs(5)))
@@ -32,16 +35,26 @@ pub fn check_upgrade() -> bool {
             let release: GitHubRelease = match res.body_mut().read_json() {
                 Ok(r) => r,
                 Err(e) => {
-                    logf!("\x1b[31m[FAIL]\x1b[0m   Failed to parse GitHub release info: {}", e);
+                    logf!(
+                        "\x1b[31m[FAIL]\x1b[0m   Failed to parse GitHub release info: {}",
+                        e
+                    );
                     return false;
                 }
             };
 
             let remote_version = release.tag_name.trim_start_matches('v');
             if remote_version == CURRENT_VERSION {
-                logf!("\x1b[32m[OK]\x1b[0m     You are on the latest version (v{})!", CURRENT_VERSION);
+                logf!(
+                    "\x1b[32m[OK]\x1b[0m     You are on the latest version (v{})!",
+                    CURRENT_VERSION
+                );
             } else {
-                logf!("\x1b[33m[UPDATE]\x1b[0m A new version is available: {} (current: v{})", release.tag_name, CURRENT_VERSION);
+                logf!(
+                    "\x1b[33m[UPDATE]\x1b[0m A new version is available: {} (current: v{})",
+                    release.tag_name,
+                    CURRENT_VERSION
+                );
                 logf!("         Download release from: {}", release.html_url);
             }
             true

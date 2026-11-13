@@ -190,7 +190,10 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
             let body = res.body_mut().read_to_string().unwrap_or_default();
             let body_lower = body.to_lowercase();
 
-            if body_lower.contains("failed") || body_lower.contains("invalid") || body_lower.contains("wrong") {
+            if body_lower.contains("failed")
+                || body_lower.contains("invalid")
+                || body_lower.contains("wrong")
+            {
                 if !quiet {
                     logf!("\x1b[31m[FAIL]\x1b[0m   Login rejected by Fortinet");
                 }
@@ -235,13 +238,21 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
             let _ = save_session(&session);
 
             if !quiet {
-                logf!("\x1b[32m[OK]\x1b[0m     Auth success (host={} magic={} timeout={}s)", session.host, session.magic, timeout);
+                logf!(
+                    "\x1b[32m[OK]\x1b[0m     Auth success (host={} magic={} timeout={}s)",
+                    session.host,
+                    session.magic,
+                    timeout
+                );
             }
             true
         }
         Err(e) => {
             if !quiet {
-                logf!("\x1b[31m[FAIL]\x1b[0m   Authentication request failed: {}", e);
+                logf!(
+                    "\x1b[31m[FAIL]\x1b[0m   Authentication request failed: {}",
+                    e
+                );
             }
             false
         }
@@ -253,24 +264,36 @@ pub fn logout() -> bool {
     let (host, magic) = match load_session() {
         Some(s) => (s.host, s.magic),
         None => {
-            logf!("\x1b[33m[NOTE]\x1b[0m   No session found. Using random magic on fallback gateway.");
+            logf!(
+                "\x1b[33m[NOTE]\x1b[0m   No session found. Using random magic on fallback gateway."
+            );
             (FALLBACK_HOST.to_string(), random_magic())
         }
     };
 
     let logout_url = format!("https://{}/logout?{}", host, magic);
-    logf!("\x1b[34m[NET]\x1b[0m    Sending logout request to: {}", logout_url);
+    logf!(
+        "\x1b[34m[NET]\x1b[0m    Sending logout request to: {}",
+        logout_url
+    );
 
     let res = do_with_retry(3, || client.get(&logout_url).call());
     clear_session();
 
     match res {
         Ok(_) => {
-            logf!("\x1b[32m[OK]\x1b[0m     Logged out successfully (host={} magic={})", host, magic);
+            logf!(
+                "\x1b[32m[OK]\x1b[0m     Logged out successfully (host={} magic={})",
+                host,
+                magic
+            );
             true
         }
         Err(e) => {
-            logf!("\x1b[33m[WARN]\x1b[0m   Logout request returned: {} (session cleared locally)", e);
+            logf!(
+                "\x1b[33m[WARN]\x1b[0m   Logout request returned: {} (session cleared locally)",
+                e
+            );
             true
         }
     }

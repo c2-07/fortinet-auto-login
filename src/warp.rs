@@ -22,14 +22,7 @@ pub const WARP_ANYCAST_IPS: [&str; 12] = [
     "188.114.99.1",
 ];
 
-pub const WARP_PORTS: [&str; 6] = [
-    "500",
-    "4500",
-    "1701",
-    "854",
-    "880",
-    "890",
-];
+pub const WARP_PORTS: [&str; 6] = ["500", "4500", "1701", "854", "880", "890"];
 
 pub fn generate_candidate_endpoints() -> Vec<String> {
     let mut candidates = vec![
@@ -93,7 +86,10 @@ pub fn test_internet_connectivity(timeout: Duration) -> bool {
     }
 
     // Probe 2: Standard Firefox captive portal probe
-    if let Ok(res) = client.get("http://detectportal.firefox.com/success.txt").call() {
+    if let Ok(res) = client
+        .get("http://detectportal.firefox.com/success.txt")
+        .call()
+    {
         if res.status() == 200 {
             return true;
         }
@@ -134,17 +130,21 @@ pub fn cycle_wifi() -> bool {
 #[cfg(target_os = "macos")]
 fn cycle_wifi_darwin() -> bool {
     let mut wifi_device = "en0".to_string();
-    if let Ok(output) = Command::new("networksetup").arg("-listallhardwareports").output() {
+    if let Ok(output) = Command::new("networksetup")
+        .arg("-listallhardwareports")
+        .output()
+    {
         let text = String::from_utf8_lossy(&output.stdout);
         let lines: Vec<&str> = text.lines().collect();
         for i in 0..lines.len() {
-            if lines[i].contains("Wi-Fi") || lines[i].contains("AirPort") {
-                if i + 1 < lines.len() && lines[i + 1].contains("Device:") {
-                    let parts: Vec<&str> = lines[i + 1].split_whitespace().collect();
-                    if parts.len() >= 2 {
-                        wifi_device = parts[1].to_string();
-                        break;
-                    }
+            if (lines[i].contains("Wi-Fi") || lines[i].contains("AirPort"))
+                && i + 1 < lines.len()
+                && lines[i + 1].contains("Device:")
+            {
+                let parts: Vec<&str> = lines[i + 1].split_whitespace().collect();
+                if parts.len() >= 2 {
+                    wifi_device = parts[1].to_string();
+                    break;
                 }
             }
         }
@@ -167,7 +167,10 @@ fn cycle_wifi_darwin() -> bool {
 
 #[cfg(target_os = "linux")]
 fn cycle_wifi_linux() -> bool {
-    if let Ok(s) = Command::new("nmcli").args(["radio", "wifi", "off"]).status() {
+    if let Ok(s) = Command::new("nmcli")
+        .args(["radio", "wifi", "off"])
+        .status()
+    {
         if s.success() {
             thread::sleep(Duration::from_secs(2));
             return Command::new("nmcli")
@@ -204,7 +207,9 @@ fn cycle_wifi_windows() -> bool {
         }
     }
 
-    let _ = Command::new("netsh").args(["interface", "set", "interface", "Wi-Fi", "disable"]).status();
+    let _ = Command::new("netsh")
+        .args(["interface", "set", "interface", "Wi-Fi", "disable"])
+        .status();
     thread::sleep(Duration::from_secs(2));
     Command::new("netsh")
         .args(["interface", "set", "interface", "Wi-Fi", "enable"])
@@ -222,7 +227,9 @@ fn recover_via_wifi_cycle(username: &str, password: &str) -> bool {
 
     if !cycle_wifi() {
         logf!("\x1b[33m[INFO]\x1b[0m   Could not toggle Wi-Fi automatically (system permission required).");
-        logf!("         Please toggle Wi-Fi OFF and ON in system settings to refresh your DHCP IP,");
+        logf!(
+            "         Please toggle Wi-Fi OFF and ON in system settings to refresh your DHCP IP,"
+        );
         logf!("         then re-run './autologin' and './autologin -warp'.");
         return false;
     }
@@ -240,21 +247,29 @@ fn recover_via_wifi_cycle(username: &str, password: &str) -> bool {
         }
     }
 
-    let recovery_endpoints = ["162.159.192.1:500", "162.159.192.1:4500", "162.159.193.1:500"];
-    logf!("\x1b[36m[WARP]\x1b[0m   Retrying Cloudflare WARP with fresh IP and clean session table...");
+    let recovery_endpoints = [
+        "162.159.192.1:500",
+        "162.159.192.1:4500",
+        "162.159.193.1:500",
+    ];
+    logf!(
+        "\x1b[36m[WARP]\x1b[0m   Retrying Cloudflare WARP with fresh IP and clean session table..."
+    );
     for ep in &recovery_endpoints {
-        let _ = Command::new("warp-cli").args(["tunnel", "endpoint", "set", ep]).status();
+        let _ = Command::new("warp-cli")
+            .args(["tunnel", "endpoint", "set", ep])
+            .status();
         let _ = Command::new("warp-cli").arg("connect").status();
 
         for _ in 0..5 {
             thread::sleep(Duration::from_millis(800));
             if let Ok(output) = Command::new("warp-cli").arg("status").output() {
                 let status_str = String::from_utf8_lossy(&output.stdout);
-                if status_str.contains("Connected") {
-                    if test_internet_connectivity(Duration::from_secs(3)) {
-                        logf!("\x1b[32m[OK]\x1b[0m     Success! Reconnected to Cloudflare WARP via {} (Internet verified active)", ep);
-                        return true;
-                    }
+                if status_str.contains("Connected")
+                    && test_internet_connectivity(Duration::from_secs(3))
+                {
+                    logf!("\x1b[32m[OK]\x1b[0m     Success! Reconnected to Cloudflare WARP via {} (Internet verified active)", ep);
+                    return true;
                 }
             }
         }
@@ -272,7 +287,11 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
     if det.is_fortinet_network {
         let mut info = String::new();
         if let Some(ref dev) = det.device_serial_number {
-            info = format!(" (Device ID: {}, Gateway: {})", dev, det.gateway_ip.as_deref().unwrap_or(""));
+            info = format!(
+                " (Device ID: {}, Gateway: {})",
+                dev,
+                det.gateway_ip.as_deref().unwrap_or("")
+            );
         } else if let Some(ref gw) = det.gateway_ip {
             info = format!(" (Gateway: {})", gw);
         }
@@ -298,8 +317,12 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
         return false;
     }
 
-    let _ = Command::new("warp-cli").args(["debug", "connectivity-check", "disable"]).status();
-    let _ = Command::new("warp-cli").args(["tunnel", "protocol", "set", "WireGuard"]).status();
+    let _ = Command::new("warp-cli")
+        .args(["debug", "connectivity-check", "disable"])
+        .status();
+    let _ = Command::new("warp-cli")
+        .args(["tunnel", "protocol", "set", "WireGuard"])
+        .status();
 
     // Step 3: Check if already connected and verify live internet
     if let Ok(output) = Command::new("warp-cli").arg("status").output() {
@@ -318,23 +341,33 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
 
     logf!("\x1b[36m[WARP]\x1b[0m   Initializing intelligent Cloudflare WARP auto-rotation...");
     let endpoints = generate_candidate_endpoints();
-    logf!("  Generated {} candidate endpoint combinations across {} Anycast IP pools", endpoints.len(), WARP_ANYCAST_IPS.len());
+    logf!(
+        "  Generated {} candidate endpoint combinations across {} Anycast IP pools",
+        endpoints.len(),
+        WARP_ANYCAST_IPS.len()
+    );
 
     // Step 4: Rotate candidates
     for (i, ep) in endpoints.iter().enumerate() {
         if i >= 8 {
-            break
+            break;
         }
 
         if !preflight_probe(ep) {
             continue;
         }
 
-        logf!("\x1b[34m[WARP]\x1b[0m   Testing endpoint [{}/8]: {}...", i + 1, ep);
+        logf!(
+            "\x1b[34m[WARP]\x1b[0m   Testing endpoint [{}/8]: {}...",
+            i + 1,
+            ep
+        );
         let _ = Command::new("warp-cli").arg("disconnect").status();
         thread::sleep(Duration::from_millis(100));
 
-        let _ = Command::new("warp-cli").args(["tunnel", "endpoint", "set", ep]).status();
+        let _ = Command::new("warp-cli")
+            .args(["tunnel", "endpoint", "set", ep])
+            .status();
         let _ = Command::new("warp-cli").arg("connect").status();
 
         let mut connected = false;
@@ -343,7 +376,9 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
             if let Ok(output) = Command::new("warp-cli").arg("status").output() {
                 let status_str = String::from_utf8_lossy(&output.stdout);
                 if status_str.contains("Connected") {
-                    if let Ok(stats_out) = Command::new("warp-cli").args(["tunnel", "stats"]).output() {
+                    if let Ok(stats_out) =
+                        Command::new("warp-cli").args(["tunnel", "stats"]).output()
+                    {
                         let stats_str = String::from_utf8_lossy(&stats_out.stdout);
                         if !stats_str.contains("Received: 0B") || attempt >= 3 {
                             connected = true;
@@ -362,24 +397,29 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
             }
             logf!("\x1b[33m[WARN]\x1b[0m   Endpoint {} connected to tunnel but internet is unreachable (UDP blackholed).", ep);
         } else {
-            logf!("\x1b[33m[WARN]\x1b[0m   Endpoint {} timed out. Trying next candidate...", ep);
+            logf!(
+                "\x1b[33m[WARN]\x1b[0m   Endpoint {} timed out. Trying next candidate...",
+                ep
+            );
         }
     }
 
     // Step 5: Tunnel key rotation attempt
     logf!("\x1b[34m[WARP]\x1b[0m   Rotating tunnel cryptographic keys...");
-    let _ = Command::new("warp-cli").args(["tunnel", "rotate-keys"]).status();
-    let _ = Command::new("warp-cli").args(["tunnel", "endpoint", "set", "162.159.192.1:500"]).status();
+    let _ = Command::new("warp-cli")
+        .args(["tunnel", "rotate-keys"])
+        .status();
+    let _ = Command::new("warp-cli")
+        .args(["tunnel", "endpoint", "set", "162.159.192.1:500"])
+        .status();
     let _ = Command::new("warp-cli").arg("connect").status();
 
     thread::sleep(Duration::from_secs(2));
     if let Ok(output) = Command::new("warp-cli").arg("status").output() {
         let status_str = String::from_utf8_lossy(&output.stdout);
-        if status_str.contains("Connected") {
-            if test_internet_connectivity(Duration::from_secs(3)) {
-                logf!("\x1b[32m[OK]\x1b[0m     Connected after tunnel key rotation (Internet verified active)!");
-                return true;
-            }
+        if status_str.contains("Connected") && test_internet_connectivity(Duration::from_secs(3)) {
+            logf!("\x1b[32m[OK]\x1b[0m     Connected after tunnel key rotation (Internet verified active)!");
+            return true;
         }
     }
 
@@ -396,7 +436,10 @@ pub fn disconnect_warp() -> bool {
             true
         }
         Ok(res) => {
-            logf!("\x1b[31m[FAIL]\x1b[0m   Failed to disconnect: {}", String::from_utf8_lossy(&res.stderr));
+            logf!(
+                "\x1b[31m[FAIL]\x1b[0m   Failed to disconnect: {}",
+                String::from_utf8_lossy(&res.stderr)
+            );
             false
         }
         Err(e) => {

@@ -10,6 +10,12 @@ use std::os::unix::fs::PermissionsExt;
 use crate::types::Credentials;
 
 pub fn get_app_dir() -> PathBuf {
+    if let Ok(dir) = env::var("FORTINET_CONFIG_DIR") {
+        let p = PathBuf::from(dir);
+        let _ = fs::create_dir_all(&p);
+        return p;
+    }
+
     let home = env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .unwrap_or_else(|_| env::temp_dir().to_string_lossy().to_string());

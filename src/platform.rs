@@ -96,17 +96,26 @@ fn install_macos_launch_agent() {
     );
 
     if let Err(e) = fs::write(&plist_path, plist_content) {
-        println!("\x1b[31m[FAIL]\x1b[0m   Failed to write LaunchAgent plist: {}", e);
+        println!(
+            "\x1b[31m[FAIL]\x1b[0m   Failed to write LaunchAgent plist: {}",
+            e
+        );
         return;
     }
 
     let plist_str = plist_path.to_string_lossy();
-    let _ = Command::new("launchctl").args(["unload", &plist_str]).status();
-    let status = Command::new("launchctl").args(["load", &plist_str]).status();
+    let _ = Command::new("launchctl")
+        .args(["unload", &plist_str])
+        .status();
+    let status = Command::new("launchctl")
+        .args(["load", &plist_str])
+        .status();
 
     match status {
         Ok(s) if s.success() => {
-            println!("\x1b[32m[OK]\x1b[0m     macOS LaunchAgent installed and loaded successfully!");
+            println!(
+                "\x1b[32m[OK]\x1b[0m     macOS LaunchAgent installed and loaded successfully!"
+            );
             println!("\x1b[36m[INFO]\x1b[0m   Hybrid service active (event-driven Wi-Fi triggers + 30s session watchdog)");
             println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", LOG_PATH);
         }
@@ -120,7 +129,9 @@ fn install_macos_launch_agent() {
 fn uninstall_macos_launch_agent() {
     let plist_path = get_launch_agent_path();
     let plist_str = plist_path.to_string_lossy();
-    let _ = Command::new("launchctl").args(["unload", &plist_str]).status();
+    let _ = Command::new("launchctl")
+        .args(["unload", &plist_str])
+        .status();
     let _ = fs::remove_file(&plist_path);
     println!("\x1b[32m[OK]\x1b[0m     macOS LaunchAgent removed successfully");
 }
@@ -166,18 +177,25 @@ WantedBy=default.target
     );
 
     if let Err(e) = fs::write(&service_path, unit_content) {
-        println!("\x1b[31m[FAIL]\x1b[0m   Failed to write systemd unit: {}", e);
+        println!(
+            "\x1b[31m[FAIL]\x1b[0m   Failed to write systemd unit: {}",
+            e
+        );
         return;
     }
 
-    let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+    let _ = Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
     let status = Command::new("systemctl")
         .args(["--user", "enable", "--now", "fortinet-autologin.service"])
         .status();
 
     match status {
         Ok(s) if s.success() => {
-            println!("\x1b[32m[OK]\x1b[0m     Linux systemd service installed and started successfully!");
+            println!(
+                "\x1b[32m[OK]\x1b[0m     Linux systemd service installed and started successfully!"
+            );
             println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", LOG_PATH);
         }
         _ => {
@@ -193,7 +211,9 @@ fn uninstall_linux_systemd_service() {
         .status();
     let service_path = get_systemd_service_path();
     let _ = fs::remove_file(service_path);
-    let _ = Command::new("systemctl").args(["--user", "daemon-reload"]).status();
+    let _ = Command::new("systemctl")
+        .args(["--user", "daemon-reload"])
+        .status();
     println!("\x1b[32m[OK]\x1b[0m     Linux systemd service uninstalled successfully");
 }
 
@@ -205,14 +225,17 @@ pub fn view_logs(follow: bool, lines: usize) {
     }
 
     if follow {
-        println!("\x1b[36m[LOGS]\x1b[0m   Streaming {} live (Ctrl+C to exit)...", LOG_PATH);
+        println!(
+            "\x1b[36m[LOGS]\x1b[0m   Streaming {} live (Ctrl+C to exit)...",
+            LOG_PATH
+        );
         let _ = Command::new("tail")
             .args(["-f", "-n", &lines.to_string(), LOG_PATH])
             .status();
     } else {
         if let Ok(file) = File::open(&log_path) {
             let reader = BufReader::new(file);
-            let all_lines: Vec<String> = reader.lines().filter_map(|l| l.ok()).collect();
+            let all_lines: Vec<String> = reader.lines().map_while(Result::ok).collect();
             let start = if all_lines.len() > lines && lines > 0 {
                 all_lines.len() - lines
             } else {
@@ -230,7 +253,10 @@ pub fn clear_logs() {
     let log_path = PathBuf::from(LOG_PATH);
     if let Ok(file) = File::create(&log_path) {
         drop(file);
-        println!("\x1b[32m[OK]\x1b[0m     Background logs cleared ({})", LOG_PATH);
+        println!(
+            "\x1b[32m[OK]\x1b[0m     Background logs cleared ({})",
+            LOG_PATH
+        );
     } else {
         println!("\x1b[31m[FAIL]\x1b[0m   Failed to clear log file");
     }

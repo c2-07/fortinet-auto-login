@@ -1,48 +1,43 @@
-mod credentials;
-mod daemon;
-mod detect;
-mod error;
-mod lock;
-mod logger;
-mod network;
-mod platform;
-mod session;
-mod types;
-mod upgrade;
-mod warp;
-
 use std::env;
 use std::process;
 use std::time::Duration;
 
-use credentials::{load_credentials, prompt_credentials, save_credentials};
-use daemon::{run_auto_mode, run_daemon};
-use detect::print_status;
-use network::{login, logout};
-use platform::{clear_logs, install_service, uninstall_service, view_logs};
-use types::Credentials;
-use upgrade::check_upgrade;
-use warp::{disconnect_warp, fix_and_connect_warp};
+use fortinet_lib::credentials::{load_credentials, prompt_credentials, save_credentials};
+use fortinet_lib::daemon::{run_auto_mode, run_daemon};
+use fortinet_lib::detect::print_status;
+use fortinet_lib::lock::ProcessLock;
+use fortinet_lib::logf;
+use fortinet_lib::network::{login, logout};
+use fortinet_lib::platform::{clear_logs, install_service, uninstall_service, view_logs};
+use fortinet_lib::types::Credentials;
+use fortinet_lib::upgrade::check_upgrade;
+use fortinet_lib::warp::{disconnect_warp, fix_and_connect_warp};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 fn print_custom_usage() {
     println!("Usage: autologin [options]");
     println!("\nAuthentication & Session:");
-    println!("  autologin                    Log in to captive portal (default, prompts on first run)");
+    println!(
+        "  autologin                    Log in to captive portal (default, prompts on first run)"
+    );
     println!("  autologin -u <user> -p <pwd> Update saved credentials and authenticate");
     println!("  autologin -logout            Log out of current captive portal session");
     println!("\nNetwork & Diagnostics:");
     println!("  autologin -status            Inspect network, Fortinet detection & active session");
     println!("\nBackground Service & Daemon:");
-    println!("  autologin -service install   Install event-driven background service (macOS / Linux)");
+    println!(
+        "  autologin -service install   Install event-driven background service (macOS / Linux)"
+    );
     println!("  autologin -service uninstall Remove background service");
     println!("  autologin -daemon [-i 45s]   Run continuous polling daemon in foreground");
     println!("\nCloudflare WARP Circumvention:");
     println!("  autologin -warp              Intelligently rotate Anycast IPs & ports to connect Cloudflare WARP");
     println!("  autologin -warp-disconnect   Disconnect WARP and restore normal network routing");
     println!("\nLogs & Maintenance:");
-    println!("  autologin -logs [-n 40]      View background service logs (default: last 40 lines)");
+    println!(
+        "  autologin -logs [-n 40]      View background service logs (default: last 40 lines)"
+    );
     println!("  autologin -logs -f           Live stream / follow logs (like tail -f)");
     println!("  autologin -logs -clear       Clear background log file");
     println!("  autologin -upgrade           Check for and install the latest release from GitHub");
@@ -281,7 +276,7 @@ fn main() {
     }
 
     // 10. Default Login
-    let _lock = match lock::ProcessLock::try_acquire("login") {
+    let _lock = match ProcessLock::try_acquire("login") {
         Ok(l) => Some(l),
         Err(_) => {
             logf!("\x1b[33m[NOTE]\x1b[0m   Another autologin process is actively running. Exiting cleanly.");
@@ -310,6 +305,7 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fortinet_lib::*;
 
     #[test]
     fn test_parse_duration() {
@@ -356,7 +352,10 @@ mod tests {
     #[test]
     fn test_parse_host_from_url() {
         let url = "https://192.168.55.253:1003/fgtauth?magic=abc";
-        assert_eq!(network::parse_host_from_url(url), Some("192.168.55.253:1003".to_string()));
+        assert_eq!(
+            network::parse_host_from_url(url),
+            Some("192.168.55.253:1003".to_string())
+        );
     }
 
     #[test]

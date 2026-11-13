@@ -15,7 +15,10 @@ pub fn run_daemon(interval: Duration, username: &str, password: &str) {
         }
     };
 
-    logf!("\x1b[36m[DAEMON]\x1b[0m Starting background monitoring daemon (interval: {:?})", interval);
+    logf!(
+        "\x1b[36m[DAEMON]\x1b[0m Starting background monitoring daemon (interval: {:?})",
+        interval
+    );
 
     let mut last_connected = false;
     let mut initial_run = true;

@@ -3,7 +3,11 @@ name = "fortinet-auto-login"
 version = "1.0.0"
 edition = "2021"
 authors = ["c2-07"]
-description = "A lightning-fast, zero-dependency CLI written in Rust that automates login, logout, network detection, and background keepalive for Fortinet FortiGate captive portals."
+description = "A lightning-fast, highly optimized CLI written in Rust that automates login, logout, network detection, and background keepalive for Fortinet FortiGate captive portals."
+
+[lib]
+name = "fortinet_lib"
+path = "src/lib.rs"
 
 [[bin]]
 name = "autologin"
