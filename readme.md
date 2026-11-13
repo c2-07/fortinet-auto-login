@@ -87,7 +87,7 @@ Terminate your active captive portal session on the gateway:
 ```
 
 ### Cloudflare WARP Auto-Rotation & Connect
-Evade FortiGate UDP session blackholing by auto-testing Candidate Anycast pools and whitelisted VPN ports (500, 4500):
+Evade FortiGate UDP session blackholing with automated network pre-detection, Anycast pool rotation across whitelisted VPN ports (500, 4500), real outbound internet verification, and automatic Wi-Fi reset recovery:
 ```bash
 ./autologin -warp
 ```
@@ -97,7 +97,7 @@ To disconnect and restore normal routing:
 ./autologin -warp-disconnect
 ```
 
-> **Note (Windows, macOS, Linux):** If WARP stalls or your connection freezes, briefly toggle Wi-Fi OFF and ON in your operating system's settings. This forces a DHCP lease renewal, clears the FortiGate firewall's UDP session tracking penalties, and grants a clean state.
+> **Automatic Recovery:** If FortiGate blackholes all candidate UDP sessions, `autologin -warp` automatically cycles Wi-Fi off and on (macOS, Linux, Windows), acquires a clean DHCP lease, re-authenticates with the captive portal, and re-establishes the tunnel.
 
 ---
 
