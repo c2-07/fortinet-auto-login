@@ -40,6 +40,9 @@ func daemon(interval time.Duration) {
 }
 
 func runAutoMode() {
+	// Flush detection cache so we always inspect fresh state upon an OS event trigger
+	InvalidateDetectionCache()
+
 	c, ok := loadCredentials()
 	if !ok {
 		if notifyCredentialsNeeded() {
@@ -53,7 +56,12 @@ func runAutoMode() {
 	// Check if we are on a Fortinet network using our primary detection engine
 	det := DetectFortinetNetwork()
 	if !det.IsFortinetNetwork {
-		// Not a Fortinet network, skip authentication attempt
+		// Not a Fortinet network, skip authentication attempt with 0 CPU cost
+		return
+	}
+
+	// If internet is already reachable, no captive portal interception is occurring
+	if det.InternetConnected {
 		return
 	}
 

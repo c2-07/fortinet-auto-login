@@ -214,6 +214,12 @@ func TestServiceMode(t *testing.T) {
 	if !strings.Contains(string(content), "-auto") {
 		t.Errorf("plist does not contain the -auto flag: %s", string(content))
 	}
+	if !strings.Contains(string(content), "StartInterval") {
+		t.Errorf("plist should contain StartInterval for the 30s session watchdog")
+	}
+	if !strings.Contains(string(content), "com.apple.airport.preferences.plist") {
+		t.Errorf("plist should watch com.apple.airport.preferences.plist for Wi-Fi state changes")
+	}
 
 	// Test Uninstallation
 	cmdUninstall := exec.Command(binPath, "-uninstall")

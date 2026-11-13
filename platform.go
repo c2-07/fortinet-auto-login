@@ -145,10 +145,12 @@ func installDarwin(exe string) {
         <string>-auto</string>
     </array>
     <key>StartInterval</key>
-    <integer>5</integer>
+    <integer>30</integer>
     <key>WatchPaths</key>
     <array>
-        <string>/Library/Preferences/SystemConfiguration/com.apple.wifi.message-tracer.plist</string>
+        <string>/Library/Preferences/SystemConfiguration/com.apple.airport.preferences.plist</string>
+        <string>/Library/Preferences/SystemConfiguration/NetworkInterfaces.plist</string>
+        <string>/Library/Preferences/SystemConfiguration/preferences.plist</string>
         <string>/var/run/resolv.conf</string>
     </array>
     <key>RunAtLoad</key>
@@ -174,7 +176,7 @@ func installDarwin(exe string) {
 	}
 
 	fmt.Println("\033[32m[OK]\033[0m     Installed successfully")
-	fmt.Println("\033[36m[INFO]\033[0m   Background service active (event-driven + 5s fallback)")
+	fmt.Println("\033[36m[INFO]\033[0m   Hybrid service active (event-driven Wi-Fi triggers + 30s session watchdog)")
 	fmt.Println("\033[36m[INFO]\033[0m   Logs: /tmp/autologin.log")
 }
 
