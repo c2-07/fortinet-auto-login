@@ -58,8 +58,8 @@ func TestFlags(t *testing.T) {
 		{
 			name:       "help flag",
 			args:       []string{"-h"},
-			wantStderr: "Usage of", // flag package prints help to stderr
-			wantExit:   0,          // flag.Parse() exits with 0 on -h
+			wantStdout: "Usage: autologin",
+			wantExit:   0,
 		},
 	}
 
@@ -118,15 +118,21 @@ func TestNetworkAndDaemonFlags(t *testing.T) {
 			wantStdout: "No session. Using random magic.",
 		},
 		{
-			name:       "keepalive mode",
-			args:       []string{"-keepalive"},
-			wantStdout: "No session for keepalive",
+			name:       "keepalive mode consolidated",
+			args:       []string{"-keepalive", "-interval", "1s"},
+			wantStdout: "Daemon started",
+			killAfter:  500 * time.Millisecond,
 		},
 		{
 			name:       "daemon mode",
 			args:       []string{"-daemon", "-interval", "1s"},
 			wantStdout: "Daemon started",
 			killAfter:  500 * time.Millisecond,
+		},
+		{
+			name:       "status mode",
+			args:       []string{"-status"},
+			wantStdout: "Network & Fortinet Status",
 		},
 	}
 
