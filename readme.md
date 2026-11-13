@@ -82,6 +82,8 @@ autologin [flags]
 | `-uninstall` | | `false` | Uninstall macOS LaunchAgent background service |
 | `-logs` | | `false` | View recent background daemon logs |
 | `-auto` | | `false` | Run once automatically (used by background jobs) |
+| `-detect` | | `false` | Detect Fortinet presence and captive portal on network |
+| `-upgrade` | | `false` | Check for and install the latest release from GitHub |
 | `-version` | `-v` | `false` | Print version information |
 
 ### Examples

@@ -50,7 +50,40 @@ func main() {
 	var logsFlag bool
 	flag.BoolVar(&logsFlag, "logs", false, "view background task logs")
 
+	var detectFlag bool
+	flag.BoolVar(&detectFlag, "detect", false, "detect Fortinet presence and captive portal on the network")
+
+	var upgradeFlag bool
+	flag.BoolVar(&upgradeFlag, "upgrade", false, "check for and install the latest release from GitHub")
+
 	flag.Parse()
+
+	if upgradeFlag {
+		if !upgradeCLI() {
+			os.Exit(1)
+		}
+		return
+	}
+
+	if detectFlag {
+		res := DetectFortinetNetwork()
+		if res.IsFortinetNetwork {
+			logf("\033[32m[DETECTED]\033[0m Fortinet network identified!")
+			logf("  Method:       %s", res.DetectionMethod)
+			if res.GatewayIP != "" {
+				logf("  Gateway:      %s", res.GatewayIP)
+			}
+			if res.DeviceSerialNumber != "" {
+				logf("  Device ID:    %s", res.DeviceSerialNumber)
+			}
+			if res.CaptivePortalHost != "" {
+				logf("  Portal Host:  %s", res.CaptivePortalHost)
+			}
+		} else {
+			logf("\033[33m[NOT DETECTED]\033[0m No Fortinet captive portal or gateway signature detected.")
+		}
+		return
+	}
 
 	if versionFlag {
 		fmt.Printf("fortinet-auto-login %s, commit %s, built at %s\n", version, commit, date)
