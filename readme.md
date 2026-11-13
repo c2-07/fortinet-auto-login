@@ -41,6 +41,8 @@ autologin [options]
 | `-service uninstall`| `-uninstall`| Remove background service |
 | `-daemon` | `-d` | Run continuous monitoring daemon in foreground |
 | `-interval <duration>`| `-i 30s` | Set custom polling interval for daemon (default `45s`) |
+| `-warp` | | Intelligently rotate Anycast IPs & ports to connect Cloudflare WARP |
+| `-warp-disconnect` | | Disconnect Cloudflare WARP and restore normal network routing |
 | `-logs` | | View recent background service logs (last 40 lines) |
 | `-logs -f` | `-follow` | Stream / follow background logs live (like `tail -f`) |
 | `-logs -clear` | `-clean` | Clear background log history |
@@ -82,6 +84,17 @@ Follow real-time background authentication events:
 Terminate your active captive portal session on the gateway:
 ```bash
 ./autologin -logout
+```
+
+### Cloudflare WARP Auto-Rotation & Connect
+Evade FortiGate UDP session blackholing by auto-testing Candidate Anycast pools and whitelisted VPN ports (500, 4500):
+```bash
+./autologin -warp
+```
+
+To disconnect and restore normal routing:
+```bash
+./autologin -warp-disconnect
 ```
 
 ---

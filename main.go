@@ -28,6 +28,9 @@ func printCustomUsage() {
 	fmt.Println("  autologin -service install   Install event-driven background service (macOS / Linux)")
 	fmt.Println("  autologin -service uninstall Remove background service")
 	fmt.Println("  autologin -daemon [-i 45s]   Run continuous polling daemon in foreground")
+	fmt.Println("\nCloudflare WARP Circumvention:")
+	fmt.Println("  autologin -warp              Intelligently rotate Anycast IPs & ports to connect Cloudflare WARP")
+	fmt.Println("  autologin -warp-disconnect   Disconnect WARP and restore normal network routing")
 	fmt.Println("\nLogs & Maintenance:")
 	fmt.Println("  autologin -logs [-n 40]      View background service logs (default: last 40 lines)")
 	fmt.Println("  autologin -logs -f           Live stream / follow logs (like tail -f)")
@@ -76,6 +79,11 @@ func main() {
 	flag.DurationVar(&intervalFlag, "interval", 45*time.Second, "polling interval for -daemon")
 	flag.DurationVar(&intervalFlag, "i", 45*time.Second, "shorthand for -interval")
 
+	// Cloudflare WARP Bypass
+	var warpFlag, warpDisconnectFlag bool
+	flag.BoolVar(&warpFlag, "warp", false, "intelligent Cloudflare WARP Anycast rotation & auto-connection")
+	flag.BoolVar(&warpDisconnectFlag, "warp-disconnect", false, "disconnect Cloudflare WARP cleanly")
+
 	// Logs
 	var logsFlag, followLogsFlag, clearLogsFlag bool
 	flag.BoolVar(&logsFlag, "logs", false, "view background task logs")
@@ -120,7 +128,21 @@ func main() {
 		return
 	}
 
-	// 3. Service Management (consolidated)
+	// 3. Cloudflare WARP Circumvention
+	if warpFlag {
+		if !FixAndConnectWarp() {
+			os.Exit(1)
+		}
+		return
+	}
+	if warpDisconnectFlag {
+		if !DisconnectWarp() {
+			os.Exit(1)
+		}
+		return
+	}
+
+	// 4. Service Management (consolidated)
 	if serviceFlag != "" || installFlag || uninstallFlag {
 		action := strings.ToLower(serviceFlag)
 		if installFlag || action == "install" {
