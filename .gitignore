@@ -14,3 +14,6 @@ c.txt
 
 # Go test binaries
 *.test
+
+# Rust build artifacts
+target/

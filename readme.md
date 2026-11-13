@@ -1,6 +1,6 @@
-# fortinet-auto-login
+# fortinet-auto-login (Rust Edition)
 
-A lightning-fast, zero-dependency CLI written in Go that automates login, logout, network detection, and background keepalive for Fortinet FortiGate captive portals.
+A lightning-fast, highly optimized CLI written in Rust that automates login, logout, network detection, and background keepalive for Fortinet FortiGate captive portals.
 
 ---
 
@@ -8,11 +8,11 @@ A lightning-fast, zero-dependency CLI written in Go that automates login, logout
 
 ### 1. Build and Run
 ```bash
-# Build from source
-go build -o autologin .
+# Build release binary
+cargo build --release
 
 # Run login (prompts for username & password on first run)
-./autologin
+./target/release/autologin
 ```
 
 ### 2. Enable Automatic Background Login
