@@ -59,8 +59,13 @@ where
     Err(AppError::NetworkUnreachable(last_err))
 }
 
+pub fn get_check_url() -> String {
+    std::env::var("FORTINET_CHECK_URL").unwrap_or_else(|_| CHECK_URL.to_string())
+}
+
 pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), AppError> {
-    let resp = do_with_retry(3, || client.get(CHECK_URL).call());
+    let check_url = get_check_url();
+    let resp = do_with_retry(3, || client.get(&check_url).call());
 
     match resp {
         Ok(mut res) => {
@@ -156,7 +161,8 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
 
     let magic = parse_magic_from_url(&portal_url).unwrap_or_else(|| {
         if let Some(pos) = portal_url.find('?') {
-            portal_url[pos + 1..].to_string()
+            let query = &portal_url[pos + 1..];
+            query.strip_prefix("magic=").unwrap_or(query).to_string()
         } else {
             random_magic()
         }

@@ -8,6 +8,7 @@ use std::time::Duration;
 use fortinet_lib::credentials::{
     credentials_file_path, delete_credentials, load_credentials, save_credentials,
 };
+use fortinet_lib::daemon::{daemon_tick, DaemonTickResult};
 use fortinet_lib::lock::ProcessLock;
 use fortinet_lib::network::{
     do_with_retry, extract_portal_url, make_client, parse_host_from_url, parse_magic_from_url,
@@ -301,4 +302,122 @@ fn test_integration_url_parsers() {
     let invalid_url = "not_a_valid_url";
     assert_eq!(parse_host_from_url(invalid_url), None);
     assert_eq!(parse_magic_from_url(invalid_url), None);
+}
+
+#[test]
+fn test_integration_reconnect_on_unexpected_logout() {
+    let _env_guard = setup_test_env();
+
+    // Mock Server State Machine:
+    // 0 = Authenticated (Internet online: returns HTTP 200 "success\n")
+    // 1 = Unexpected Logout / Captive Portal Intercepted (returns redirect to /fgtauth)
+    let state = Arc::new(AtomicUsize::new(0));
+    let state_clone = Arc::clone(&state);
+
+    let (url, stop) = spawn_mock_server(move |req| {
+        let current_state = state_clone.load(Ordering::SeqCst);
+
+        if req.contains("GET /check") {
+            if current_state == 0 {
+                // User is online
+                "HTTP/1.1 200 OK\r\nContent-Length: 8\r\nConnection: close\r\n\r\nsuccess\n"
+                    .to_string()
+            } else {
+                // Unexpected logout: firewall intercepts probe with captive portal redirect
+                let host = req
+                    .lines()
+                    .find(|l| l.to_lowercase().starts_with("host:"))
+                    .and_then(|l| l.split_whitespace().nth(1))
+                    .unwrap_or("127.0.0.1");
+                let portal_url = format!("http://{}/fgtauth?magic=079c4a9e6abca729", host);
+                let redirect_body = format!(
+                    r#"<HTML><HEAD><TITLE>Firewall Authentication</TITLE></HEAD>
+<BODY><script>window.location="{}";</script>
+</BODY></HTML>"#,
+                    portal_url
+                );
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    redirect_body.len(),
+                    redirect_body
+                )
+            }
+        } else if req.contains("GET /fgtauth") {
+            // Pre-flight login page
+            let body = "<html><title>Fortinet Login</title></html>";
+            format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            )
+        } else if req.contains("POST /fgtauth") {
+            // Re-authentication POST from login()
+            if req.contains("reauth_user")
+                && req.contains("reauth_pass")
+                && req.contains("079c4a9e6abca729")
+            {
+                // Authentication accepted: restore online state
+                state_clone.store(0, Ordering::SeqCst);
+                let body = r#"<html><script>var countdown = 14400;</script><body>Authentication Success</body></html>"#;
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                    body.len(),
+                    body
+                )
+            } else {
+                "HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n".to_string()
+            }
+        } else {
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n".to_string()
+        }
+    });
+
+    std::env::set_var("FORTINET_CHECK_URL", format!("{}/check", url));
+
+    // Save test credentials in isolated test directory
+    let creds = Credentials {
+        username: "reauth_user".to_string(),
+        password: "reauth_pass".to_string(),
+        ssid: "Campus-WiFi".to_string(),
+    };
+    assert!(save_credentials(&creds).is_ok());
+
+    let mut last_connected = false;
+
+    // Phase 1: User is currently connected and authenticated
+    let tick1 = daemon_tick("reauth_user", "reauth_pass", &mut last_connected, true);
+    assert_eq!(tick1, DaemonTickResult::Connected);
+    assert!(
+        last_connected,
+        "Should recognize active internet connection"
+    );
+
+    // Phase 2: Unexpected Logout occurs (firewall drops session table / idle timeout)
+    state.store(1, Ordering::SeqCst);
+
+    // Phase 3: Daemon / Watchdog tick runs
+    // It must detect captive portal interception, automatically invoke login(), and restore connection
+    let tick2 = daemon_tick("reauth_user", "reauth_pass", &mut last_connected, false);
+    assert_eq!(
+        tick2,
+        DaemonTickResult::Reauthenticated,
+        "Daemon must detect captive portal and automatically re-authenticate"
+    );
+    assert!(last_connected, "last_connected should be restored to true");
+
+    // Phase 4: Verify the new session was persisted to disk with updated magic token and countdown
+    let session = load_session().expect("new session should be saved after re-authentication");
+    assert_eq!(session.magic, "079c4a9e6abca729");
+    assert_eq!(session.timeout, 14400);
+
+    // Phase 5: Subsequent check confirms internet access is fully restored
+    let tick3 = daemon_tick("reauth_user", "reauth_pass", &mut last_connected, false);
+    assert_eq!(
+        tick3,
+        DaemonTickResult::Connected,
+        "Internet access must be fully restored"
+    );
+
+    std::env::remove_var("FORTINET_CHECK_URL");
+    stop.store(true, Ordering::Relaxed);
 }

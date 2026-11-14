@@ -6,6 +6,49 @@ use crate::lock::ProcessLock;
 use crate::logf;
 use crate::network::login;
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum DaemonTickResult {
+    Connected,
+    Reauthenticated,
+    AuthFailed,
+    NotFortinet,
+}
+
+pub fn daemon_tick(
+    username: &str,
+    password: &str,
+    last_connected: &mut bool,
+    initial_run: bool,
+) -> DaemonTickResult {
+    let det = detect_fortinet_network();
+
+    if det.internet_connected {
+        if !*last_connected {
+            logf!("\x1b[32m[OK]\x1b[0m     Internet is active and healthy");
+            *last_connected = true;
+        }
+        DaemonTickResult::Connected
+    } else {
+        if *last_connected || initial_run {
+            logf!("\x1b[33m[WARN]\x1b[0m   Internet connection lost or captive portal intercepted");
+            *last_connected = false;
+        }
+
+        if det.is_fortinet_network {
+            logf!("\x1b[34m[AUTH]\x1b[0m   Fortinet network detected. Authenticating...");
+            if login(false, false, username, password) {
+                *last_connected = true;
+                DaemonTickResult::Reauthenticated
+            } else {
+                DaemonTickResult::AuthFailed
+            }
+        } else {
+            logf!("\x1b[33m[NOTE]\x1b[0m   Not on a Fortinet network. Idling...");
+            DaemonTickResult::NotFortinet
+        }
+    }
+}
+
 pub fn run_daemon(interval: Duration, username: &str, password: &str) {
     let _lock = match ProcessLock::try_acquire("daemon") {
         Ok(l) => l,
@@ -25,31 +68,20 @@ pub fn run_daemon(interval: Duration, username: &str, password: &str) {
     let mut consecutive_failures = 0;
 
     loop {
-        let det = detect_fortinet_network();
-
-        if det.internet_connected {
-            consecutive_failures = 0;
-            if !last_connected {
-                logf!("\x1b[32m[OK]\x1b[0m     Internet is active and healthy");
-                last_connected = true;
+        match daemon_tick(username, password, &mut last_connected, initial_run) {
+            DaemonTickResult::Connected | DaemonTickResult::Reauthenticated => {
+                consecutive_failures = 0;
             }
-        } else {
-            if last_connected || initial_run {
-                logf!("\x1b[33m[WARN]\x1b[0m   Internet connection lost or captive portal intercepted");
-                last_connected = false;
+            DaemonTickResult::AuthFailed => {
+                consecutive_failures += 1;
+                logf!(
+                    "\x1b[31m[FAIL]\x1b[0m   Login attempt failed (failures: {}). Will retry in {:?}",
+                    consecutive_failures,
+                    interval
+                );
             }
-
-            if det.is_fortinet_network {
-                logf!("\x1b[34m[AUTH]\x1b[0m   Fortinet network detected. Authenticating...");
-                if login(false, false, username, password) {
-                    last_connected = true;
-                    consecutive_failures = 0;
-                } else {
-                    consecutive_failures += 1;
-                    logf!("\x1b[31m[FAIL]\x1b[0m   Login attempt failed (failures: {}). Will retry in {:?}", consecutive_failures, interval);
-                }
-            } else {
-                logf!("\x1b[33m[NOTE]\x1b[0m   Not on a Fortinet network. Idling...");
+            DaemonTickResult::NotFortinet => {
+                consecutive_failures = 0;
             }
         }
 

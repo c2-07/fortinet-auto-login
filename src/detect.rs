@@ -83,19 +83,10 @@ fn resolve_gateway_from_system() -> Option<String> {
 }
 
 pub fn detect_fortinet_network() -> FortinetDetectionResult {
-    {
-        let lock = CACHED_DETECTION.lock().unwrap();
-        if let Some((ref res, instant)) = *lock {
-            if instant.elapsed() < CACHE_TTL && res.is_fortinet_network {
-                return res.clone();
-            }
-        }
-    }
-
     let mut result = FortinetDetectionResult::default();
     let client = make_client();
 
-    // Probe 1: Check captive portal redirect and general connectivity
+    // Probe 1: Check live captive portal redirect and general connectivity
     if let Ok((portal_url, already_connected)) = get_portal(&client) {
         result.internet_connected = already_connected;
         if let Some(portal) = portal_url {
@@ -106,6 +97,18 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
 
             update_cache(&result);
             return result;
+        }
+
+        // If internet is active, reuse cached Fortinet network identity to avoid repeated TCP probes
+        if already_connected {
+            let lock = CACHED_DETECTION.lock().unwrap();
+            if let Some((ref cached, instant)) = *lock {
+                if instant.elapsed() < CACHE_TTL && cached.is_fortinet_network {
+                    let mut res = cached.clone();
+                    res.internet_connected = true;
+                    return res;
+                }
+            }
         }
     }
 
