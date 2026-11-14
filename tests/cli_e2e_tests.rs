@@ -54,10 +54,18 @@ fn test_cli_invalid_flag() {
 #[test]
 fn test_cli_status_mode() {
     let bin = get_bin_path();
+    let temp_dir =
+        std::env::temp_dir().join(format!("test_fortinet_status_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&temp_dir);
+    std::fs::create_dir_all(&temp_dir).expect("create temp dir");
+
     let output = Command::new(&bin)
         .arg("-status")
+        .env("FORTINET_CONFIG_DIR", &temp_dir)
         .output()
         .expect("execute autologin -status");
+
+    let _ = std::fs::remove_dir_all(&temp_dir);
 
     assert!(output.status.success(), "Exit code must be 0 for -status");
     let stdout = String::from_utf8_lossy(&output.stdout);
