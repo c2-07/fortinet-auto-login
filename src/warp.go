@@ -249,23 +249,27 @@ func recoverViaWiFiCycle() bool {
 func isConnectivityCheckDisabled(output string) (disabled bool, found bool) {
 	for _, line := range strings.Split(output, "\n") {
 		lower := strings.ToLower(strings.TrimSpace(line))
-		if strings.Contains(lower, "connectivity check") || strings.Contains(lower, "connectivity_check") || strings.Contains(lower, "connectivity-check") {
-			// Explicit disabled settings
-			if strings.Contains(lower, "disabled: true") || strings.Contains(lower, "disabled:true") ||
-				strings.Contains(lower, "disabled: \"true\"") || strings.Contains(lower, ": disabled") {
+		// Remove quotes and commas so JSON/YAML/text formats parse uniformly
+		clean := strings.ReplaceAll(lower, "\"", "")
+		clean = strings.ReplaceAll(clean, ",", "")
+
+		if strings.Contains(clean, "connectivity check") || strings.Contains(clean, "connectivity_check") || strings.Contains(clean, "connectivity-check") {
+			// Explicit disabled settings (disabled: true, : disabled)
+			if strings.Contains(clean, "disabled: true") || strings.Contains(clean, "disabled:true") ||
+				strings.Contains(clean, ": disabled") || strings.Contains(clean, "= disabled") {
 				return true, true
 			}
-			// Explicit enabled settings
-			if strings.Contains(lower, "disabled: false") || strings.Contains(lower, "disabled:false") ||
-				strings.Contains(lower, "disabled: \"false\"") || strings.Contains(lower, ": enabled") {
+			// Explicit enabled settings (disabled: false, : enabled)
+			if strings.Contains(clean, "disabled: false") || strings.Contains(clean, "disabled:false") ||
+				strings.Contains(clean, ": enabled") || strings.Contains(clean, "= enabled") {
 				return false, true
 			}
-			// General fallback keywords
-			if strings.Contains(lower, "disabled") {
+			// Fallback indicators
+			if strings.Contains(clean, ": false") || strings.Contains(clean, "= false") {
+				return false, true
+			}
+			if strings.Contains(clean, ": true") || strings.Contains(clean, "= true") {
 				return true, true
-			}
-			if strings.Contains(lower, "enabled") {
-				return false, true
 			}
 		}
 	}
