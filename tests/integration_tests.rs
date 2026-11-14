@@ -252,6 +252,10 @@ fn test_integration_credentials_persistence_and_permissions() {
     assert_eq!(loaded.username, "qa_test_user");
     assert_eq!(loaded.password, "qa_test_secret_password");
     assert_eq!(loaded.ssid, "Campus-WiFi");
+    assert!(
+        credentials_file_path().exists(),
+        "credentials.json file must exist on disk"
+    );
 
     #[cfg(unix)]
     {
@@ -263,6 +267,10 @@ fn test_integration_credentials_persistence_and_permissions() {
 
     delete_credentials();
     assert!(load_credentials().is_none());
+    assert!(
+        !credentials_file_path().exists(),
+        "credentials.json must be deleted"
+    );
 }
 
 #[test]
