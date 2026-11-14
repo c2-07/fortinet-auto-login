@@ -27,6 +27,7 @@ jobs:
           go-version: '1.22'
 
       - name: Format Check
+        if: runner.os == 'Linux'
         shell: bash
         run: |
           diffs=$(gofmt -l .)
@@ -43,4 +44,4 @@ jobs:
         run: go test -v ./...
 
       - name: Build Binary
-        run: go build -v ./src
+        run: go build -v -o autologin ./src

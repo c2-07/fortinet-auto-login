@@ -1,0 +1,13 @@
+# Auto detect text files and perform LF normalization
+* text=auto eol=lf
+
+# Force Go source files to always use LF line endings
+*.go text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.html text eol=lf
+Makefile text eol=lf
+
+# Windows PowerShell scripts
+*.ps1 text eol=crlf
