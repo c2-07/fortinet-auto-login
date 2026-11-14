@@ -21,9 +21,13 @@ type credentials struct {
 }
 
 func getAppDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		home = os.TempDir()
+	home := os.Getenv("HOME")
+	if home == "" {
+		var err error
+		home, err = os.UserHomeDir()
+		if err != nil {
+			home = os.TempDir()
+		}
 	}
 	dir := filepath.Join(home, ".fortinet-autologin")
 	os.MkdirAll(dir, 0700)

@@ -22,8 +22,12 @@ func TestMain(m *testing.M) {
 	}
 	defer os.RemoveAll(dir)
 
-	binPath = filepath.Join(dir, "fortinet-auto-login")
-	cmd := exec.Command("go", "build", "-o", binPath)
+	binName := "fortinet-auto-login"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	binPath = filepath.Join(dir, binName)
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
 	if err := cmd.Run(); err != nil {
 		os.Exit(1)
 	}
@@ -68,6 +72,7 @@ func TestFlags(t *testing.T) {
 			cmd := exec.Command(binPath, tt.args...)
 			cmd.Env = append(os.Environ(),
 				"HOME="+fakeHome,
+				"USERPROFILE="+fakeHome,
 				"XDG_CACHE_HOME="+fakeCache,
 			)
 
@@ -80,6 +85,8 @@ func TestFlags(t *testing.T) {
 			if err != nil {
 				if exitErr, ok := err.(*exec.ExitError); ok {
 					exitCode = exitErr.ExitCode()
+				} else {
+					t.Fatalf("failed to run %s: %v", binPath, err)
 				}
 			}
 
@@ -142,6 +149,7 @@ func TestNetworkAndDaemonFlags(t *testing.T) {
 			// Use an invalid proxy to fail real network requests instantly
 			cmd.Env = append(os.Environ(),
 				"HOME="+fakeHome,
+				"USERPROFILE="+fakeHome,
 				"http_proxy=http://127.0.0.1:1",
 				"https_proxy=http://127.0.0.1:1",
 			)
@@ -151,12 +159,20 @@ func TestNetworkAndDaemonFlags(t *testing.T) {
 			cmd.Stderr = &stdout
 
 			if tt.killAfter > 0 {
-				cmd.Start()
+				if err := cmd.Start(); err != nil {
+					t.Fatalf("failed to start %s: %v", binPath, err)
+				}
 				time.Sleep(tt.killAfter)
-				cmd.Process.Kill()
-				cmd.Wait()
+				if cmd.Process != nil {
+					_ = cmd.Process.Kill()
+				}
+				_ = cmd.Wait()
 			} else {
-				cmd.Run()
+				if err := cmd.Run(); err != nil {
+					if _, ok := err.(*exec.ExitError); !ok {
+						t.Fatalf("failed to run %s: %v", binPath, err)
+					}
+				}
 			}
 
 			if tt.wantStdout != "" && !strings.Contains(stdout.String(), tt.wantStdout) {

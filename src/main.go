@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -250,7 +251,7 @@ func main() {
 			logPath := filepath.Join(os.TempDir(), "autologin.log")
 			f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 			if err == nil {
-				logOut = f
+				logOut = io.MultiWriter(os.Stdout, f)
 			}
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
