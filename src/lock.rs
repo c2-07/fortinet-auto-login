@@ -58,6 +58,7 @@ impl ProcessLock {
                 .read(true)
                 .write(true)
                 .create(true)
+                .truncate(true)
                 .share_mode(0) // Exclusive lock: sharing denied
                 .open(&lock_path)
                 .map_err(|_| {
