@@ -44,7 +44,7 @@ fn test_config_defaults() {
         .contains(&"http://captive.apple.com/hotspot-detect.html".to_string()));
     assert_eq!(config.gateway_ports, vec![1003, 1000]);
     assert_eq!(config.daemon_interval_secs, 45);
-    assert_eq!(config.request_timeout_secs, 5);
+    assert_eq!(config.request_timeout_secs, 10);
 }
 
 #[test]
@@ -120,7 +120,7 @@ fn test_fallback_probe_when_primary_fails() {
 
     stop_signal.store(true, Ordering::Relaxed);
 
-    assert!(res.is_ok(), "get_portal must succeed via fallback URL");
+    assert!(res.is_ok(), "get_portal must succeed via fallback URL: {:?}", res);
     let (portal, is_online) = res.unwrap();
     assert!(is_online, "Fallback URL should report internet is online");
     assert_eq!(portal, None);

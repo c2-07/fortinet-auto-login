@@ -142,7 +142,28 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
             }
         }
 
-        // Test HTTP handshake on the candidate port
+        // Test 1: HTTP portal redirect probe on port 1000 (responds in <20ms)
+        let gw_ip = target.split(':').next().unwrap_or(target);
+        let http_probe_url = format!("http://{}:1000/", gw_ip);
+        if let Ok(mut resp) = client.get(&http_probe_url).call() {
+            let body = resp.body_mut().read_to_string().unwrap_or_default();
+            if body.contains("fgtauth") || body.to_lowercase().contains("fortigate") {
+                result.is_fortinet_network = true;
+                result.gateway_ip = Some(target.clone());
+                result.detection_method = Some("Gateway Captive Portal Signature".to_string());
+
+                if let Some(caps) = SERIAL_RE.captures(&body) {
+                    if let Some(m) = caps.get(1) {
+                        result.device_serial_number = Some(m.as_str().to_string());
+                    }
+                }
+
+                update_cache(&result);
+                return result;
+            }
+        }
+
+        // Test 2: HTTP handshake on the candidate port (for non-standard portals)
         let probe_url = format!("https://{}/fgtauth", target);
         if let Ok(mut resp) = client.get(&probe_url).call() {
             let body = resp.body_mut().read_to_string().unwrap_or_default();

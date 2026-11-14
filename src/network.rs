@@ -78,7 +78,7 @@ pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), AppErr
     let mut last_err = None;
 
     for url in &config.check_urls {
-        match do_with_retry(1, || client.get(url).call()) {
+        match client.get(url).header("Connection", "close").call() {
             Ok(mut res) => {
                 let status = res.status();
                 let body = res.body_mut().read_to_string().unwrap_or_default();
@@ -119,8 +119,23 @@ pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), AppErr
         }
     }
 
+    // Direct gateway probe: when logged out, external DNS can be blackholed.
+    // Querying the gateway IP on port 1000 bypasses DNS and returns the real captive portal URL in <20ms.
+    let gw_ip = config
+        .portal_host
+        .split(':')
+        .next()
+        .unwrap_or("192.168.55.253");
+    let direct_url = format!("http://{}:1000/", gw_ip);
+    if let Ok(mut res) = client.get(&direct_url).call() {
+        let body = res.body_mut().read_to_string().unwrap_or_default();
+        if let Some(portal) = extract_portal_url(&body) {
+            return Ok((Some(portal), false));
+        }
+    }
+
     if let Some(err) = last_err {
-        Err(err)
+        Err(AppError::NetworkUnreachable(err.to_string()))
     } else {
         Ok((None, false))
     }
@@ -138,8 +153,18 @@ pub fn extract_portal_url(text: &str) -> Option<String> {
 }
 
 pub fn parse_magic_from_url(url_str: &str) -> Option<String> {
-    let caps = MAGIC_RE.captures(url_str)?;
-    caps.get(1).map(|m| m.as_str().to_string())
+    if let Some(caps) = MAGIC_RE.captures(url_str) {
+        return caps.get(1).map(|m| m.as_str().to_string());
+    }
+    if let Some(pos) = url_str.find('?') {
+        let query = &url_str[pos + 1..];
+        let token = query.strip_prefix("magic=").unwrap_or(query);
+        let token = token.split('&').next().unwrap_or(token);
+        if !token.is_empty() && token.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Some(token.to_string());
+        }
+    }
+    None
 }
 
 pub fn parse_host_from_url(url_str: &str) -> Option<String> {
@@ -157,21 +182,10 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
     let (portal, already_connected) = match get_portal(&client) {
         Ok(res) => res,
         Err(e) => {
-            // Fallback: When logged out, external DNS may be blackholed.
-            // Check if the local Fortinet gateway is directly reachable.
-            let host = get_fallback_host();
-            let direct_url = format!("https://{}/fgtauth", host);
-            if client.get(&direct_url).call().is_ok() {
-                (
-                    Some(format!("https://{}/fgtauth?{}", host, random_magic())),
-                    false,
-                )
-            } else {
-                if !quiet {
-                    logf!("\x1b[31m[FAIL]\x1b[0m   Network unreachable: {}", e);
-                }
-                return false;
+            if !quiet {
+                logf!("\x1b[31m[FAIL]\x1b[0m   Network unreachable: {}", e);
             }
+            return false;
         }
     };
 
@@ -185,8 +199,10 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
     let portal_url = match portal {
         Some(u) => u,
         None => {
-            let host = get_fallback_host();
-            format!("https://{}/fgtauth?{}", host, random_magic())
+            if !quiet {
+                logf!("\x1b[31m[FAIL]\x1b[0m   Could not obtain captive portal URL");
+            }
+            return false;
         }
     };
 
@@ -195,21 +211,39 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
         logf!("\x1b[34m[AUTH]\x1b[0m   User: {}", username);
     }
 
-    // Pre-flight GET to the captive portal to initialize session/cookies
-    let preflight = do_with_retry(3, || client.get(&portal_url).call());
-    if preflight.is_err() && !quiet {
-        logf!("\x1b[33m[WARN]\x1b[0m   Pre-flight portal probe failed, proceeding with direct POST...");
-    }
-    thread::sleep(Duration::from_millis(150));
-
-    let magic = parse_magic_from_url(&portal_url).unwrap_or_else(|| {
-        if let Some(pos) = portal_url.find('?') {
-            let query = &portal_url[pos + 1..];
-            query.strip_prefix("magic=").unwrap_or(query).to_string()
-        } else {
-            random_magic()
+    // Pre-flight GET to the captive portal to initialize session/cookies (same as Go & browser)
+    let mut page_loaded = false;
+    for attempt in 0..=3 {
+        match client.get(&portal_url).call() {
+            Ok(mut res) if res.status() == 200 => {
+                let _ = res.body_mut().read_to_string();
+                page_loaded = true;
+                break;
+            }
+            Ok(mut res) => {
+                let _ = res.body_mut().read_to_string();
+            }
+            Err(_) => {}
         }
-    });
+        if attempt < 3 {
+            thread::sleep(Duration::from_millis(250 * (attempt as u64 + 1)));
+        }
+    }
+
+    if !page_loaded && !quiet {
+        logf!("\x1b[33m[WARN]\x1b[0m   Pre-flight portal probe was non-200, proceeding with POST...");
+    }
+    thread::sleep(Duration::from_millis(200));
+
+    let magic = match parse_magic_from_url(&portal_url) {
+        Some(m) => m,
+        None => {
+            if !quiet {
+                logf!("\x1b[31m[FAIL]\x1b[0m   Failed to extract magic token from portal URL");
+            }
+            return false;
+        }
+    };
     let host = parse_host_from_url(&portal_url).unwrap_or_else(get_fallback_host);
 
     let post_url = if let Some(pos) = portal_url.find('?') {
@@ -219,12 +253,13 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
     };
     let origin = format!("https://{}", host);
 
+    // Form parameter order matching Go's url.Values.Encode() alphabetical sort:
+    // 4Tredir, magic, password, username
     let form_params = [
         ("4Tredir", "http://google.com/"),
         ("magic", &magic),
-        ("answer", "1"),
-        ("username", username),
         ("password", password),
+        ("username", username),
     ];
 
     let post_res = do_with_retry(3, || {
@@ -329,7 +364,9 @@ pub fn logout() -> bool {
         logout_url
     );
 
-    let res = do_with_retry(3, || client.get(&logout_url).call());
+    let res = do_with_retry(3, || {
+        client.get(&logout_url).header("Connection", "close").call()
+    });
     clear_session();
 
     match res {

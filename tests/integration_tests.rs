@@ -149,7 +149,6 @@ fn test_integration_login_flow_valid_credentials() {
     let post_res = client.post(&format!("{}/fgtauth", url)).send_form([
         ("4Tredir", "http://google.com/"),
         ("magic", "079c4a9e6abca729"),
-        ("answer", "1"),
         ("username", "testuser"),
         ("password", "testpass"),
     ]);

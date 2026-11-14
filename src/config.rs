@@ -18,7 +18,7 @@ pub const DEFAULT_CHECK_URLS: &[&str] = &[
 
 pub const DEFAULT_GATEWAY_PORTS: &[u16] = &[1003, 1000];
 pub const DEFAULT_DAEMON_INTERVAL_SECS: u64 = 45;
-pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 5;
+pub const DEFAULT_REQUEST_TIMEOUT_SECS: u64 = 10;
 pub const DEFAULT_MAX_RETRIES: usize = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

@@ -32,7 +32,7 @@ fn test_cli_version_flag() {
 
     assert!(output.status.success(), "Exit code must be 0 for -version");
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert!(stdout.contains("fortinet-auto-login v1.0.0 (rust)"));
+    assert!(stdout.contains("fortinet-auto-login v2.1.0 (rust)"));
 }
 
 #[test]
