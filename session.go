@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 )
 
 // Magic is the token issued per session in the portal redirect — the same
@@ -28,10 +29,8 @@ const defaultCountdown = 14400 // seconds; fallback if the page doesn't have one
 // extractCountdown pulls the refresh interval out of the keepalive page's
 // <b id="countdown">N</b>, falling back to the default if not found.
 func extractCountdown(body string) int {
-	if m := countdownRe.FindStringSubmatch(body); m != nil {
-		var n int
-		fmt.Sscanf(m[1], "%d", &n)
-		if n > 0 {
+	if m := countdownRe.FindStringSubmatch(body); len(m) > 1 {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
 			return n
 		}
 	}
@@ -42,12 +41,15 @@ func sessionFilePath() string {
 	return filepath.Join(getAppDir(), "session.json")
 }
 
-func saveSession(s session) {
+func saveSession(s session) error {
 	data, err := json.Marshal(s)
 	if err != nil {
-		return
+		return fmt.Errorf("marshal session: %w", err)
 	}
-	_ = os.WriteFile(sessionFilePath(), data, 0o600)
+	if err := os.WriteFile(sessionFilePath(), data, 0o600); err != nil {
+		return fmt.Errorf("write session: %w", err)
+	}
+	return nil
 }
 
 func clearSession() {

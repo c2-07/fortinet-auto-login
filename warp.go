@@ -39,37 +39,36 @@ var warpPorts = []string{
 	"890",
 }
 
-func generateCandidateEndpoints() []string {
-	var candidates []string
-	highPriority := []string{
-		"162.159.192.1:500",
-		"162.159.192.1:4500",
-		"162.159.193.1:500",
-		"162.159.193.1:4500",
-		"188.114.96.1:500",
-		"188.114.97.1:4500",
-	}
-	candidates = append(candidates, highPriority...)
+var highPriorityWARPEndpoints = []string{
+	"162.159.192.1:500",
+	"162.159.192.1:4500",
+	"162.159.193.1:500",
+	"162.159.193.1:4500",
+	"188.114.96.1:500",
+	"188.114.97.1:4500",
+}
 
-	var pool []string
+func generateCandidateEndpoints() []string {
+	totalCapacity := len(highPriorityWARPEndpoints) + len(warpAnycastIPs)*len(warpPorts)
+	candidates := make([]string, 0, totalCapacity)
+	candidates = append(candidates, highPriorityWARPEndpoints...)
+
+	highPrioritySet := make(map[string]struct{}, len(highPriorityWARPEndpoints))
+	for _, ep := range highPriorityWARPEndpoints {
+		highPrioritySet[ep] = struct{}{}
+	}
+
+	pool := make([]string, 0, len(warpAnycastIPs)*len(warpPorts))
 	for _, ip := range warpAnycastIPs {
 		for _, port := range warpPorts {
 			ep := ip + ":" + port
-			isDup := false
-			for _, hp := range highPriority {
-				if hp == ep {
-					isDup = true
-					break
-				}
-			}
-			if !isDup {
+			if _, exists := highPrioritySet[ep]; !exists {
 				pool = append(pool, ep)
 			}
 		}
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
-	r.Shuffle(len(pool), func(i, j int) {
+	rand.Shuffle(len(pool), func(i, j int) {
 		pool[i], pool[j] = pool[j], pool[i]
 	})
 

@@ -46,13 +46,16 @@ func loadCredentials() (credentials, bool) {
 	return c, c.Username != "" && c.Password != ""
 }
 
-func saveCredentials(c credentials) {
+func saveCredentials(c credentials) error {
 	data, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
-		return
+		return fmt.Errorf("marshal credentials: %w", err)
 	}
-	_ = os.WriteFile(credentialsFilePath(), data, 0o600)
-	os.Remove(credentialsFilePath() + ".notified")
+	if err := os.WriteFile(credentialsFilePath(), data, 0o600); err != nil {
+		return fmt.Errorf("write credentials: %w", err)
+	}
+	_ = os.Remove(credentialsFilePath() + ".notified")
+	return nil
 }
 
 func deleteCredentials() {
