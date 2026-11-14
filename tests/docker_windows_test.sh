@@ -8,7 +8,7 @@ echo "=========================================================="
 cd /app
 
 echo "--- 1. Cross-compiling for Windows x86_64 ---"
-GOOS=windows GOARCH=amd64 go build -o autologin.exe .
+GOOS=windows GOARCH=amd64 go build -o autologin.exe ./src
 AUTOLOGIN_EXE="./autologin.exe"
 
 if [ ! -f "$AUTOLOGIN_EXE" ]; then

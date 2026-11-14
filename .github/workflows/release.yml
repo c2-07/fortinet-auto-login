@@ -62,7 +62,7 @@ jobs:
         run: |
           mkdir -p dist
           LDFLAGS="-s -w -X main.version=${{ env.VERSION }} -X main.commit=${{ env.COMMIT }} -X main.date=${{ env.DATE }}"
-          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "dist/${{ matrix.artifact_name }}" .
+          GOOS=${{ matrix.os }} GOARCH=${{ matrix.arch }} CGO_ENABLED=0 go build -ldflags="$LDFLAGS" -o "dist/${{ matrix.artifact_name }}" ./src
           chmod +x "dist/${{ matrix.artifact_name }}" || true
 
       - name: Upload artifact

@@ -11,7 +11,7 @@ echo "--- 1. Linux Compilation & Unit Tests ---"
 go test -v ./...
 
 echo "--- 2. Build Release Binary for Linux ---"
-go build -o autologin .
+go build -o autologin ./src
 AUTOLOGIN="./autologin"
 
 echo "--- 3. Setup Test Credentials ---"
