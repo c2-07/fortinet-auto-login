@@ -435,10 +435,13 @@ mod tests {
 
     #[test]
     fn test_random_magic() {
-        let m1 = session::random_magic();
-        let m2 = session::random_magic();
-        assert_eq!(m1.len(), 16);
-        assert_ne!(m1, m2);
+        use std::collections::HashSet;
+        let mut seen = HashSet::new();
+        for _ in 0..100 {
+            let m = session::random_magic();
+            assert_eq!(m.len(), 16);
+            assert!(seen.insert(m), "random_magic must produce unique tokens");
+        }
     }
 
     #[test]
