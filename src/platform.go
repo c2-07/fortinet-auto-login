@@ -116,8 +116,10 @@ func installAgent() {
 		installDarwin(exe)
 	} else if runtime.GOOS == "linux" {
 		installLinux(exe)
+	} else if runtime.GOOS == "windows" {
+		installWindows(exe)
 	} else {
-		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install is only supported on macOS and Linux")
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-install is only supported on macOS, Linux, and Windows")
 	}
 }
 
@@ -126,9 +128,48 @@ func uninstallAgent() {
 		uninstallDarwin()
 	} else if runtime.GOOS == "linux" {
 		uninstallLinux()
+	} else if runtime.GOOS == "windows" {
+		uninstallWindows()
 	} else {
-		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall is only supported on macOS and Linux")
+		fmt.Println("\033[31m[FAIL]\033[0m   Auto-uninstall is only supported on macOS, Linux, and Windows")
 	}
+}
+
+func installWindows(exe string) {
+	taskName := "FortinetAutoLogin"
+	trArg := fmt.Sprintf("\"%s\" -daemon", exe)
+
+	cmd := exec.Command("schtasks",
+		"/create",
+		"/tn", taskName,
+		"/tr", trArg,
+		"/sc", "onlogon",
+		"/f",
+	)
+	if err := cmd.Run(); err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to create scheduled task via schtasks: %v\n", err)
+		return
+	}
+
+	_ = exec.Command("schtasks", "/run", "/tn", taskName).Run()
+
+	logPath := getLogFilePath()
+	fmt.Println("\033[32m[OK]\033[0m     Windows Task Scheduler background service installed and started!")
+	fmt.Println("\033[36m[INFO]\033[0m   Runs automatically at logon with 45s session watchdog")
+	fmt.Printf("\033[36m[INFO]\033[0m   Logs: %s\n", logPath)
+}
+
+func uninstallWindows() {
+	taskName := "FortinetAutoLogin"
+
+	_ = exec.Command("schtasks", "/end", "/tn", taskName).Run()
+	cmd := exec.Command("schtasks", "/delete", "/tn", taskName, "/f")
+	if err := cmd.Run(); err != nil {
+		fmt.Println("\033[33m[WARN]\033[0m   Task not found or could not be removed via schtasks")
+		return
+	}
+
+	fmt.Println("\033[32m[OK]\033[0m     Windows background service uninstalled successfully")
 }
 
 func installDarwin(exe string) {
@@ -375,6 +416,17 @@ func cleanShellPathUnix() {
 	}
 }
 
+func cleanShellPathWindows() {
+	script := `
+		$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+		if ($userPath) {
+			$filtered = ($userPath -split ';' | Where-Object { $_ -and $_ -notlike '*fortinet-auto-login*' -and $_ -notlike '*.fortinet-autologin*' }) -join ';'
+			[Environment]::SetEnvironmentVariable("Path", $filtered, "User")
+		}
+	`
+	_ = exec.Command("powershell", "-NoProfile", "-Command", script).Run()
+}
+
 func fullUninstall() {
 	fmt.Println("\033[33m[UNINSTALL]\033[0m Completely uninstalling autologin...")
 
@@ -402,13 +454,21 @@ func fullUninstall() {
 	// 5. Clean shell PATH modifications
 	if runtime.GOOS != "windows" {
 		cleanShellPathUnix()
+	} else {
+		cleanShellPathWindows()
 	}
 	fmt.Println("\033[32m[OK]\033[0m     Cleaned shell PATH configuration")
 
 	// 6. Remove executable itself
 	if exe, err := os.Executable(); err == nil {
 		fmt.Printf("\033[32m[OK]\033[0m     Removing executable binary at %s\n", exe)
-		_ = os.Remove(exe)
+		if runtime.GOOS == "windows" {
+			old := exe + ".old"
+			_ = os.Remove(old)
+			_ = os.Rename(exe, old)
+		} else {
+			_ = os.Remove(exe)
+		}
 	}
 
 	fmt.Println("\033[32m[OK]\033[0m     autologin has been completely uninstalled from this system.")

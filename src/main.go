@@ -55,6 +55,31 @@ func main() {
 	// Custom usage output
 	flag.Usage = printCustomUsage
 
+	// Check manual service subcommands before flag.Parse()
+	if len(os.Args) > 1 {
+		arg1 := strings.ToLower(os.Args[1])
+		switch arg1 {
+		case "install", "-install", "--install", "service-install", "-service-install", "--service-install":
+			installAgent()
+			return
+		case "service-uninstall", "-service-uninstall", "--service-uninstall":
+			uninstallAgent()
+			return
+		case "service", "-service", "--service":
+			if len(os.Args) > 2 {
+				sub := strings.ToLower(os.Args[2])
+				if sub == "install" {
+					installAgent()
+					return
+				}
+				if sub == "uninstall" || sub == "remove" {
+					uninstallAgent()
+					return
+				}
+			}
+		}
+	}
+
 	// Check manual -config subcommand before flag.Parse() to support sub-arguments
 	for i, arg := range os.Args[1:] {
 		if arg == "-config" || arg == "--config" {
