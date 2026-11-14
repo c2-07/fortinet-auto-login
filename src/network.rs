@@ -1,3 +1,4 @@
+use std::sync::LazyLock;
 use std::thread;
 use std::time::{Duration, SystemTime};
 
@@ -14,6 +15,19 @@ use crate::types::Session;
 pub const CHECK_URL: &str = "http://detectportal.firefox.com/";
 pub const FALLBACK_HOST: &str = "192.168.55.253:1003";
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0 Safari/537.36";
+
+static PORTAL_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r#"window\.location="([^"]+)""#).unwrap(),
+        Regex::new(r#"location\.href="([^"]+)""#).unwrap(),
+        Regex::new(r#"location\.replace\("([^"]+)"\)"#).unwrap(),
+        Regex::new(r#"<meta\s+http-equiv="refresh"\s+content="[^"]*url=([^"]+)""#).unwrap(),
+    ]
+});
+
+static MAGIC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"magic=([a-fA-F0-9]+)").unwrap());
+
+static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://([^/]+)").unwrap());
 
 pub fn make_client() -> ureq::Agent {
     let tls_config = TlsConfig::builder().disable_verification(true).build();
@@ -74,19 +88,10 @@ pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), AppErr
 }
 
 pub fn extract_portal_url(text: &str) -> Option<String> {
-    let patterns = [
-        r#"window\.location="([^"]+)""#,
-        r#"location\.href="([^"]+)""#,
-        r#"location\.replace\("([^"]+)"\)"#,
-        r#"<meta\s+http-equiv="refresh"\s+content="[^"]*url=([^"]+)""#,
-    ];
-
-    for pat in &patterns {
-        if let Ok(re) = Regex::new(pat) {
-            if let Some(caps) = re.captures(text) {
-                if let Some(m) = caps.get(1) {
-                    return Some(m.as_str().to_string());
-                }
+    for re in PORTAL_PATTERNS.iter() {
+        if let Some(caps) = re.captures(text) {
+            if let Some(m) = caps.get(1) {
+                return Some(m.as_str().to_string());
             }
         }
     }
@@ -94,14 +99,12 @@ pub fn extract_portal_url(text: &str) -> Option<String> {
 }
 
 pub fn parse_magic_from_url(url_str: &str) -> Option<String> {
-    let re = Regex::new(r"magic=([a-fA-F0-9]+)").ok()?;
-    let caps = re.captures(url_str)?;
+    let caps = MAGIC_RE.captures(url_str)?;
     caps.get(1).map(|m| m.as_str().to_string())
 }
 
 pub fn parse_host_from_url(url_str: &str) -> Option<String> {
-    let re = Regex::new(r"https?://([^/]+)").ok()?;
-    let caps = re.captures(url_str)?;
+    let caps = HOST_RE.captures(url_str)?;
     caps.get(1).map(|m| m.as_str().to_string())
 }
 

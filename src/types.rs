@@ -1,11 +1,33 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
     pub password: String,
     #[serde(default)]
     pub ssid: String,
+}
+
+impl std::fmt::Debug for Credentials {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Credentials")
+            .field("username", &self.username)
+            .field("password", &"[REDACTED]")
+            .field("ssid", &self.ssid)
+            .finish()
+    }
+}
+
+impl Drop for Credentials {
+    fn drop(&mut self) {
+        // Zeroize password memory to prevent plaintext retention in RAM
+        unsafe {
+            let bytes = self.password.as_bytes_mut();
+            for b in bytes.iter_mut() {
+                std::ptr::write_volatile(b, 0);
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

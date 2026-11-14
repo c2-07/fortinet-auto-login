@@ -56,7 +56,10 @@ where
     (base_url, stop_signal)
 }
 
-fn setup_test_env() {
+static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+fn setup_test_env() -> std::sync::MutexGuard<'static, ()> {
+    let guard = TEST_ENV_LOCK.lock().unwrap();
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -64,6 +67,7 @@ fn setup_test_env() {
     let tmp = std::env::temp_dir().join(format!("fortinet_test_{}", nanos));
     let _ = std::fs::create_dir_all(&tmp);
     std::env::set_var("FORTINET_CONFIG_DIR", tmp);
+    guard
 }
 
 #[test]
@@ -228,7 +232,7 @@ fn test_integration_process_lock_concurrency() {
 
 #[test]
 fn test_integration_credentials_persistence_and_permissions() {
-    setup_test_env();
+    let _env_guard = setup_test_env();
     let test_creds = Credentials {
         username: "qa_test_user".to_string(),
         password: "qa_test_secret_password".to_string(),
@@ -237,6 +241,11 @@ fn test_integration_credentials_persistence_and_permissions() {
 
     let save_res = save_credentials(&test_creds);
     assert!(save_res.is_ok());
+
+    // Verify Debug representation redacts sensitive password bytes
+    let debug_repr = format!("{:?}", test_creds);
+    assert!(debug_repr.contains("[REDACTED]"));
+    assert!(!debug_repr.contains("qa_test_secret_password"));
 
     let loaded = load_credentials().expect("credentials should load");
     assert_eq!(loaded.username, "qa_test_user");
@@ -257,7 +266,7 @@ fn test_integration_credentials_persistence_and_permissions() {
 
 #[test]
 fn test_integration_session_lifecycle() {
-    setup_test_env();
+    let _env_guard = setup_test_env();
     let session = Session {
         host: "192.168.55.253:1003".to_string(),
         magic: random_magic(),

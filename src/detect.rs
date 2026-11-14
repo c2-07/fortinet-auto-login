@@ -1,6 +1,6 @@
 use std::net::{TcpStream, ToSocketAddrs};
 use std::process::Command;
-use std::sync::Mutex;
+use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
 use regex::Regex;
@@ -12,15 +12,38 @@ use crate::session::load_session;
 use crate::types::FortinetDetectionResult;
 
 static CACHED_DETECTION: Mutex<Option<(FortinetDetectionResult, Instant)>> = Mutex::new(None);
+static CACHED_GATEWAY: Mutex<Option<(String, Instant)>> = Mutex::new(None);
 const CACHE_TTL: Duration = Duration::from_secs(20);
+
+static SERIAL_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(FG[0-9A-Z]{14})").unwrap());
 
 #[allow(dead_code)]
 pub fn invalidate_detection_cache() {
     let mut lock = CACHED_DETECTION.lock().unwrap();
     *lock = None;
+    let mut gw_lock = CACHED_GATEWAY.lock().unwrap();
+    *gw_lock = None;
 }
 
 pub fn get_default_gateway_hint() -> Option<String> {
+    {
+        let lock = CACHED_GATEWAY.lock().unwrap();
+        if let Some((ref gw, instant)) = *lock {
+            if instant.elapsed() < CACHE_TTL {
+                return Some(gw.clone());
+            }
+        }
+    }
+
+    let gw = resolve_gateway_from_system();
+    if let Some(ref val) = gw {
+        let mut lock = CACHED_GATEWAY.lock().unwrap();
+        *lock = Some((val.clone(), Instant::now()));
+    }
+    gw
+}
+
+fn resolve_gateway_from_system() -> Option<String> {
     #[cfg(target_os = "macos")]
     {
         if let Ok(output) = Command::new("route")
@@ -93,8 +116,6 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
         gateway_candidates.insert(0, format!("{}:1003", gw));
     }
 
-    let serial_re = Regex::new(r"(FG[0-9A-Z]{14})").ok();
-
     for target in &gateway_candidates {
         // Quick TCP probe (handles both IP:port and host:port)
         if let Ok(mut addrs) = target.to_socket_addrs() {
@@ -119,11 +140,9 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
                 result.detection_method = Some("Gateway TLS Service Signature".to_string());
 
                 // Extract serial number if present
-                if let Some(ref re) = serial_re {
-                    if let Some(caps) = re.captures(&body) {
-                        if let Some(m) = caps.get(1) {
-                            result.device_serial_number = Some(m.as_str().to_string());
-                        }
+                if let Some(caps) = SERIAL_RE.captures(&body) {
+                    if let Some(m) = caps.get(1) {
+                        result.device_serial_number = Some(m.as_str().to_string());
                     }
                 }
 

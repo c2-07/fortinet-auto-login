@@ -1,12 +1,22 @@
 use std::fs::{self, File};
 use std::io::{self, Write};
 use std::path::PathBuf;
+use std::sync::LazyLock;
 use std::time::SystemTime;
 
 use regex::Regex;
 
 use crate::credentials::get_app_dir;
 use crate::types::Session;
+
+static COUNTDOWN_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
+    vec![
+        Regex::new(r#"var\s+countdown\s*=\s*(\d+)"#).unwrap(),
+        Regex::new(r#"name="countdown"\s+value="(\d+)""#).unwrap(),
+        Regex::new(r#"keepalive\((\d+)\)"#).unwrap(),
+        Regex::new(r#"id="countdown"[^>]*>(\d+)<"#).unwrap(),
+    ]
+});
 
 pub fn session_file_path() -> PathBuf {
     get_app_dir().join("session.json")
@@ -49,20 +59,11 @@ pub fn is_session_expired(session: &Session) -> bool {
 }
 
 pub fn extract_countdown(body: &str) -> Option<u64> {
-    let patterns = [
-        r#"var\s+countdown\s*=\s*(\d+)"#,
-        r#"name="countdown"\s+value="(\d+)""#,
-        r#"keepalive\((\d+)\)"#,
-        r#"id="countdown"[^>]*>(\d+)<"#,
-    ];
-
-    for pat in &patterns {
-        if let Ok(re) = Regex::new(pat) {
-            if let Some(caps) = re.captures(body) {
-                if let Some(m) = caps.get(1) {
-                    if let Ok(val) = m.as_str().parse::<u64>() {
-                        return Some(val);
-                    }
+    for re in COUNTDOWN_PATTERNS.iter() {
+        if let Some(caps) = re.captures(body) {
+            if let Some(m) = caps.get(1) {
+                if let Ok(val) = m.as_str().parse::<u64>() {
+                    return Some(val);
                 }
             }
         }

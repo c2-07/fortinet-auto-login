@@ -217,38 +217,41 @@ fn main() {
     }
 
     // Credentials resolution
-    let (username, password) = if !username_flag.is_empty() && !password_flag.is_empty() {
+    let creds = if !username_flag.is_empty() && !password_flag.is_empty() {
         let creds = Credentials {
-            username: username_flag.clone(),
-            password: password_flag.clone(),
+            username: username_flag,
+            password: password_flag,
             ssid: String::new(),
         };
         let _ = save_credentials(&creds);
-        (username_flag, password_flag)
-    } else if let Some(creds) = load_credentials() {
-        (creds.username, creds.password)
+        Some(creds)
+    } else if let Some(c) = load_credentials() {
+        Some(c)
     } else if !logout_flag {
         let (u, p) = prompt_credentials();
         let creds = Credentials {
-            username: u.clone(),
-            password: p.clone(),
+            username: u,
+            password: p,
             ssid: String::new(),
         };
         let _ = save_credentials(&creds);
-        (u, p)
+        Some(creds)
     } else {
-        (String::new(), String::new())
+        None
     };
+
+    let username = creds.as_ref().map(|c| c.username.as_str()).unwrap_or("");
+    let password = creds.as_ref().map(|c| c.password.as_str()).unwrap_or("");
 
     // 6. Internal Background Trigger
     if auto_flag {
-        run_auto_mode(&username, &password);
+        run_auto_mode(username, password);
         return;
     }
 
     // 7. Cloudflare WARP Circumvention
     if warp_flag {
-        if !fix_and_connect_warp(&username, &password) {
+        if !fix_and_connect_warp(username, password) {
             process::exit(1);
         }
         return;
@@ -271,7 +274,7 @@ fn main() {
 
     // 9. Daemon Mode
     if daemon_flag {
-        run_daemon(interval, &username, &password);
+        run_daemon(interval, username, password);
         return;
     }
 
@@ -289,7 +292,7 @@ fn main() {
         if attempt > 1 {
             logf!("\x1b[36m[RETRY]\x1b[0m  {}/5", attempt);
         }
-        if login(false, false, &username, &password) {
+        if login(false, false, username, password) {
             success = true;
             break;
         }

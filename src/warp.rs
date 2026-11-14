@@ -24,21 +24,27 @@ pub const WARP_ANYCAST_IPS: [&str; 12] = [
 
 pub const WARP_PORTS: [&str; 6] = ["500", "4500", "1701", "854", "880", "890"];
 
-pub fn generate_candidate_endpoints() -> Vec<String> {
-    let mut candidates = vec![
-        "162.159.192.1:500".to_string(),
-        "162.159.192.1:4500".to_string(),
-        "162.159.193.1:500".to_string(),
-        "162.159.193.1:4500".to_string(),
-        "188.114.96.1:500".to_string(),
-        "188.114.97.1:4500".to_string(),
-    ];
+pub const PRIORITY_ENDPOINTS: [&str; 6] = [
+    "162.159.192.1:500",
+    "162.159.192.1:4500",
+    "162.159.193.1:500",
+    "162.159.193.1:4500",
+    "188.114.96.1:500",
+    "188.114.97.1:4500",
+];
 
-    let mut pool = Vec::new();
+pub fn generate_candidate_endpoints() -> Vec<String> {
+    let total_capacity = WARP_ANYCAST_IPS.len() * WARP_PORTS.len();
+    let mut candidates = Vec::with_capacity(total_capacity);
+    for ep in &PRIORITY_ENDPOINTS {
+        candidates.push((*ep).to_string());
+    }
+
+    let mut pool = Vec::with_capacity(total_capacity.saturating_sub(PRIORITY_ENDPOINTS.len()));
     for ip in &WARP_ANYCAST_IPS {
         for port in &WARP_PORTS {
             let ep = format!("{}:{}", ip, port);
-            if !candidates.contains(&ep) {
+            if !PRIORITY_ENDPOINTS.contains(&ep.as_str()) {
                 pool.push(ep);
             }
         }
