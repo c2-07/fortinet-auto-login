@@ -1,10 +1,25 @@
 use std::env;
-use std::fs::{self, File};
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+use std::fs;
+use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
-pub const LOG_PATH: &str = "/tmp/autologin.log";
+pub fn get_log_path() -> PathBuf {
+    #[cfg(windows)]
+    {
+        env::var("TEMP")
+            .or_else(|_| env::var("TMP"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| env::temp_dir())
+            .join("autologin.log")
+    }
+    #[cfg(not(windows))]
+    {
+        PathBuf::from("/tmp/autologin.log")
+    }
+}
 
 pub fn get_exe_path() -> PathBuf {
     env::current_exe().unwrap_or_else(|_| PathBuf::from("autologin"))
@@ -21,9 +36,14 @@ pub fn install_service() {
         install_linux_systemd_service();
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        println!("\x1b[31m[FAIL]\x1b[0m   Automatic background service installation is supported on macOS and Linux.");
+        install_windows_task();
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        println!("\x1b[31m[FAIL]\x1b[0m   Automatic background service installation is supported on macOS, Linux, and Windows.");
     }
 }
 
@@ -38,9 +58,14 @@ pub fn uninstall_service() {
         uninstall_linux_systemd_service();
     }
 
-    #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+    #[cfg(target_os = "windows")]
     {
-        println!("\x1b[31m[FAIL]\x1b[0m   Automatic background service removal is supported on macOS and Linux.");
+        uninstall_windows_task();
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        println!("\x1b[31m[FAIL]\x1b[0m   Automatic background service removal is supported on macOS, Linux, and Windows.");
     }
 }
 
@@ -62,6 +87,8 @@ fn install_macos_launch_agent() {
 
     let exe = get_exe_path();
     let exe_str = exe.to_string_lossy();
+    let log_path = get_log_path();
+    let log_str = log_path.to_string_lossy();
 
     let plist_content = format!(
         r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -92,7 +119,7 @@ fn install_macos_launch_agent() {
 </dict>
 </plist>
 "#,
-        exe_str, LOG_PATH, LOG_PATH
+        exe_str, log_str, log_str
     );
 
     if let Err(e) = fs::write(&plist_path, plist_content) {
@@ -121,7 +148,7 @@ fn install_macos_launch_agent() {
                 "\x1b[32m[OK]\x1b[0m     macOS LaunchAgent installed and loaded successfully!"
             );
             println!("\x1b[36m[INFO]\x1b[0m   Hybrid service active (event-driven Wi-Fi triggers + 30s session watchdog)");
-            println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", LOG_PATH);
+            println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", log_str);
         }
         _ => {
             println!("\x1b[31m[FAIL]\x1b[0m   Failed to load LaunchAgent with launchctl");
@@ -161,6 +188,8 @@ fn install_linux_systemd_service() {
 
     let exe = get_exe_path();
     let exe_str = exe.to_string_lossy();
+    let log_path = get_log_path();
+    let log_str = log_path.to_string_lossy();
 
     let unit_content = format!(
         r#"[Unit]
@@ -179,7 +208,7 @@ StandardError=append:{}
 [Install]
 WantedBy=default.target
 "#,
-        exe_str, LOG_PATH, LOG_PATH
+        exe_str, log_str, log_str
     );
 
     if let Err(e) = fs::write(&service_path, unit_content) {
@@ -206,7 +235,7 @@ WantedBy=default.target
             println!(
                 "\x1b[32m[OK]\x1b[0m     Linux systemd service installed and started successfully!"
             );
-            println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", LOG_PATH);
+            println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", log_str);
         }
         _ => {
             println!("\x1b[31m[FAIL]\x1b[0m   Failed to enable systemd service");
@@ -231,21 +260,105 @@ fn uninstall_linux_systemd_service() {
     println!("\x1b[32m[OK]\x1b[0m     Linux systemd service uninstalled successfully");
 }
 
+#[cfg(target_os = "windows")]
+fn install_windows_task() {
+    let exe = get_exe_path();
+    let exe_str = exe.to_string_lossy();
+    let tr_arg = format!("\"{}\" -daemon -interval 30s", exe_str);
+
+    let status = Command::new("schtasks")
+        .args([
+            "/create",
+            "/tn",
+            "FortinetAutoLogin",
+            "/tr",
+            &tr_arg,
+            "/sc",
+            "onlogon",
+            "/f",
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            let _ = Command::new("schtasks")
+                .args(["/run", "/tn", "FortinetAutoLogin"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .status();
+
+            println!(
+                "\x1b[32m[OK]\x1b[0m     Windows Task Scheduler background service installed and started!"
+            );
+            println!(
+                "\x1b[36m[INFO]\x1b[0m   Runs automatically at logon with 30s session watchdog"
+            );
+            println!("\x1b[36m[INFO]\x1b[0m   Logs: {}", get_log_path().display());
+        }
+        _ => {
+            println!("\x1b[31m[FAIL]\x1b[0m   Failed to create scheduled task via schtasks");
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn uninstall_windows_task() {
+    let _ = Command::new("schtasks")
+        .args(["/end", "/tn", "FortinetAutoLogin"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    let status = Command::new("schtasks")
+        .args(["/delete", "/tn", "FortinetAutoLogin", "/f"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) if s.success() => {
+            println!("\x1b[32m[OK]\x1b[0m     Windows background service uninstalled successfully");
+        }
+        _ => {
+            println!("\x1b[31m[FAIL]\x1b[0m   Failed to remove scheduled task via schtasks");
+        }
+    }
+}
+
 pub fn view_logs(follow: bool, lines: usize) {
-    let log_path = PathBuf::from(LOG_PATH);
+    let log_path = get_log_path();
     if !log_path.exists() {
-        println!("\x1b[33m[INFO]\x1b[0m   No logs found yet at {}", LOG_PATH);
+        println!(
+            "\x1b[33m[INFO]\x1b[0m   No logs found yet at {}",
+            log_path.display()
+        );
         return;
     }
 
     if follow {
         println!(
             "\x1b[36m[LOGS]\x1b[0m   Streaming {} live (Ctrl+C to exit)...",
-            LOG_PATH
+            log_path.display()
         );
-        let _ = Command::new("tail")
-            .args(["-f", "-n", &lines.to_string(), LOG_PATH])
-            .status();
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = Command::new("tail")
+                .args(["-f", "-n", &lines.to_string(), &log_path.to_string_lossy()])
+                .status();
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let cmd = format!(
+                "Get-Content -Path '{}' -Tail {} -Wait",
+                log_path.to_string_lossy(),
+                lines
+            );
+            let _ = Command::new("powershell")
+                .args(["-NoProfile", "-Command", &cmd])
+                .status();
+        }
     } else {
         if let Ok(file) = File::open(&log_path) {
             let reader = BufReader::new(file);
@@ -264,12 +377,12 @@ pub fn view_logs(follow: bool, lines: usize) {
 }
 
 pub fn clear_logs() {
-    let log_path = PathBuf::from(LOG_PATH);
+    let log_path = get_log_path();
     if let Ok(file) = File::create(&log_path) {
         drop(file);
         println!(
             "\x1b[32m[OK]\x1b[0m     Background logs cleared ({})",
-            LOG_PATH
+            log_path.display()
         );
     } else {
         println!("\x1b[31m[FAIL]\x1b[0m   Failed to clear log file");

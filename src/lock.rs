@@ -22,7 +22,7 @@ const LOCK_NB: std::os::raw::c_int = 4;
 const LOCK_UN: std::os::raw::c_int = 8;
 
 pub struct ProcessLock {
-    _file: File,
+    file: Option<File>,
     path: PathBuf,
 }
 
@@ -77,7 +77,7 @@ impl ProcessLock {
             .open(&lock_path)?;
 
         Ok(Self {
-            _file: file,
+            file: Some(file),
             path: lock_path,
         })
     }
@@ -87,10 +87,13 @@ impl Drop for ProcessLock {
     fn drop(&mut self) {
         #[cfg(unix)]
         {
-            use std::os::unix::io::AsRawFd;
-            let fd = self._file.as_raw_fd();
-            let _ = unsafe { flock(fd, LOCK_UN) };
+            if let Some(ref f) = self.file {
+                use std::os::unix::io::AsRawFd;
+                let fd = f.as_raw_fd();
+                let _ = unsafe { flock(fd, LOCK_UN) };
+            }
         }
+        self.file.take();
         let _ = std::fs::remove_file(&self.path);
     }
 }

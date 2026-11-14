@@ -26,9 +26,7 @@ fn print_custom_usage() {
     println!("\nNetwork & Diagnostics:");
     println!("  autologin -status            Inspect network, Fortinet detection & active session");
     println!("\nBackground Service & Daemon:");
-    println!(
-        "  autologin -service install   Install event-driven background service (macOS / Linux)"
-    );
+    println!("  autologin -service install   Install background service (macOS / Linux / Windows)");
     println!("  autologin -service uninstall Remove background service");
     println!("  autologin -daemon [-i 45s]   Run continuous polling daemon in foreground");
     println!("\nCloudflare WARP Circumvention:");
@@ -245,6 +243,7 @@ fn main() {
 
     // 6. Internal Background Trigger
     if auto_flag {
+        fortinet_lib::logger::set_log_file(fortinet_lib::platform::get_log_path());
         run_auto_mode(username, password);
         return;
     }
@@ -274,6 +273,7 @@ fn main() {
 
     // 9. Daemon Mode
     if daemon_flag {
+        fortinet_lib::logger::set_log_file(fortinet_lib::platform::get_log_path());
         run_daemon(interval, username, password);
         return;
     }

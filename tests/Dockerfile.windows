@@ -1,0 +1,16 @@
+FROM rust:bookworm
+
+RUN dpkg --add-architecture i386 && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends \
+        wine \
+        wine32:i386 \
+        wine64 \
+        mingw-w64 \
+        procps && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN rustup target add x86_64-pc-windows-gnu
+
+ENV WINEDEBUG=-all
+WORKDIR /app

@@ -1,10 +1,58 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::detect::detect_fortinet_network;
 use crate::lock::ProcessLock;
 use crate::logf;
 use crate::network::login;
+
+static RUNNING: AtomicBool = AtomicBool::new(true);
+
+#[cfg(unix)]
+extern "C" fn handle_signal(_sig: std::os::raw::c_int) {
+    RUNNING.store(false, Ordering::SeqCst);
+}
+
+#[cfg(windows)]
+extern "system" fn handle_ctrl(_event: u32) -> i32 {
+    RUNNING.store(false, Ordering::SeqCst);
+    1 // Handled
+}
+
+fn register_shutdown_handler() {
+    RUNNING.store(true, Ordering::SeqCst);
+    #[cfg(unix)]
+    unsafe {
+        extern "C" {
+            fn signal(
+                sig: std::os::raw::c_int,
+                handler: extern "C" fn(std::os::raw::c_int),
+            ) -> std::os::raw::c_int;
+        }
+        signal(2, handle_signal); // SIGINT
+        signal(15, handle_signal); // SIGTERM
+    }
+    #[cfg(windows)]
+    unsafe {
+        extern "system" {
+            fn SetConsoleCtrlHandler(
+                handler: Option<extern "system" fn(u32) -> i32>,
+                add: i32,
+            ) -> i32;
+        }
+        SetConsoleCtrlHandler(Some(handle_ctrl), 1);
+    }
+}
+
+fn interruptible_sleep(duration: Duration) {
+    let start = Instant::now();
+    while start.elapsed() < duration && RUNNING.load(Ordering::SeqCst) {
+        let remaining = duration.saturating_sub(start.elapsed());
+        let chunk = remaining.min(Duration::from_millis(250));
+        thread::sleep(chunk);
+    }
+}
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum DaemonTickResult {
@@ -58,6 +106,8 @@ pub fn run_daemon(interval: Duration, username: &str, password: &str) {
         }
     };
 
+    register_shutdown_handler();
+
     logf!(
         "\x1b[36m[DAEMON]\x1b[0m Starting background monitoring daemon (interval: {:?})",
         interval
@@ -67,7 +117,7 @@ pub fn run_daemon(interval: Duration, username: &str, password: &str) {
     let mut initial_run = true;
     let mut consecutive_failures = 0;
 
-    loop {
+    while RUNNING.load(Ordering::SeqCst) {
         match daemon_tick(username, password, &mut last_connected, initial_run) {
             DaemonTickResult::Connected | DaemonTickResult::Reauthenticated => {
                 consecutive_failures = 0;
@@ -87,6 +137,10 @@ pub fn run_daemon(interval: Duration, username: &str, password: &str) {
 
         initial_run = false;
 
+        if !RUNNING.load(Ordering::SeqCst) {
+            break;
+        }
+
         // Exponential backoff if network is persistently down to avoid battery drain
         let sleep_duration = if consecutive_failures > 3 {
             interval * 2
@@ -94,8 +148,10 @@ pub fn run_daemon(interval: Duration, username: &str, password: &str) {
             interval
         };
 
-        thread::sleep(sleep_duration);
+        interruptible_sleep(sleep_duration);
     }
+
+    logf!("\x1b[36m[DAEMON]\x1b[0m Daemon received shutdown signal. Exiting cleanly...");
 }
 
 pub fn run_auto_mode(username: &str, password: &str) {

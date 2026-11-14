@@ -2,6 +2,8 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{self, BufRead, Write};
 use std::path::PathBuf;
+
+#[cfg(unix)]
 use std::process::Command;
 
 #[cfg(unix)]

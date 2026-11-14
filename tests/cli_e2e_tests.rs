@@ -1,14 +1,7 @@
 use std::process::Command;
 
 fn get_bin_path() -> String {
-    // Determine path to built binary (debug or release)
-    let debug_bin = "./target/debug/autologin";
-    let release_bin = "./target/release/autologin";
-    if std::path::Path::new(debug_bin).exists() {
-        debug_bin.to_string()
-    } else {
-        release_bin.to_string()
-    }
+    env!("CARGO_BIN_EXE_autologin").to_string()
 }
 
 #[test]
