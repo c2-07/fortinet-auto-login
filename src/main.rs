@@ -38,8 +38,38 @@ fn print_custom_usage() {
     );
     println!("  autologin -logs -f           Live stream / follow logs (like tail -f)");
     println!("  autologin -logs -clear       Clear background log file");
+    println!("\nConfiguration & Campus Settings:");
+    println!("  autologin -config            View active configuration and probe endpoints");
+    println!(
+        "  autologin -config set-host <h> Update campus gateway host (e.g. 192.168.55.253:1003)"
+    );
+    println!("  autologin -config reset      Reset configuration to factory defaults");
+    println!(
+        "  autologin -host <host:port>  Temporarily override campus gateway host for this run"
+    );
     println!("  autologin -upgrade           Check for and install the latest release from GitHub");
     println!("  autologin -version           Print version information\n");
+}
+
+fn print_config() {
+    let cfg = fortinet_lib::config::load_config();
+    let path = fortinet_lib::config::config_file_path();
+    println!("=== Campus & Engine Configuration ===");
+    println!("Config File:          {}", path.display());
+    println!("Campus Gateway Host:  {}", cfg.portal_host);
+    println!("Gateway Probe Ports:  {:?}", cfg.gateway_ports);
+    println!("Daemon Interval:      {}s", cfg.daemon_interval_secs);
+    println!("Request Timeout:      {}s", cfg.request_timeout_secs);
+    println!("Max HTTP Retries:     {}", cfg.max_retries);
+    println!("\nConnectivity Check Endpoints (Primary & Fallbacks):");
+    for (idx, url) in cfg.check_urls.iter().enumerate() {
+        if idx == 0 {
+            println!("  [1] {} (Primary)", url);
+        } else {
+            println!("  [{}] {} (Fallback)", idx + 1, url);
+        }
+    }
+    println!();
 }
 
 fn parse_duration(s: &str) -> Duration {
@@ -67,11 +97,16 @@ fn main() {
     let mut status_flag = false;
     let mut service_cmd = String::new();
     let mut daemon_flag = false;
-    let mut interval = Duration::from_secs(45);
+    let default_interval =
+        Duration::from_secs(fortinet_lib::config::load_config().daemon_interval_secs);
+    let mut interval = default_interval;
     let mut logs_flag = false;
     let mut follow_logs = false;
     let mut clear_logs_flag = false;
     let mut log_lines = 40;
+    let mut config_flag = false;
+    let mut config_cmd = String::new();
+    let mut config_val = String::new();
     let mut warp_flag = false;
     let mut warp_disconnect_flag = false;
     let mut upgrade_flag = false;
@@ -87,6 +122,23 @@ fn main() {
             }
             "-v" | "-version" | "--version" => {
                 version_flag = true;
+            }
+            "-config" | "--config" => {
+                config_flag = true;
+                if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                    config_cmd = args[i + 1].to_lowercase();
+                    i += 1;
+                    if i + 1 < args.len() && !args[i + 1].starts_with('-') {
+                        config_val = args[i + 1].clone();
+                        i += 1;
+                    }
+                }
+            }
+            "-host" | "--host" | "-portal" | "--portal" => {
+                if i + 1 < args.len() {
+                    env::set_var("FORTINET_PORTAL_HOST", &args[i + 1]);
+                    i += 1;
+                }
             }
             "-u" | "-username" | "--username" => {
                 if i + 1 < args.len() {
@@ -164,6 +216,48 @@ fn main() {
             }
         }
         i += 1;
+    }
+
+    // 0. Configuration Management
+    if config_flag {
+        match config_cmd.as_str() {
+            "" | "show" => {
+                print_config();
+                return;
+            }
+            "set-host" => {
+                if config_val.is_empty() {
+                    println!(
+                        "\x1b[31m[FAIL]\x1b[0m   Usage: autologin -config set-host <host:port>"
+                    );
+                    process::exit(1);
+                }
+                if let Err(e) = fortinet_lib::config::set_portal_host(&config_val) {
+                    println!("\x1b[31m[FAIL]\x1b[0m   Failed to save config: {}", e);
+                    process::exit(1);
+                }
+                println!(
+                    "\x1b[32m[OK]\x1b[0m     Updated campus gateway host to: {}",
+                    config_val
+                );
+                return;
+            }
+            "reset" => {
+                if let Err(e) = fortinet_lib::config::reset_config() {
+                    println!("\x1b[31m[FAIL]\x1b[0m   Failed to reset config: {}", e);
+                    process::exit(1);
+                }
+                println!("\x1b[32m[OK]\x1b[0m     Configuration reset to factory defaults");
+                return;
+            }
+            _ => {
+                println!(
+                    "\x1b[31m[FAIL]\x1b[0m   Unknown config command: '{}'. Use 'set-host <h>' or 'reset'.",
+                    config_cmd
+                );
+                process::exit(1);
+            }
+        }
     }
 
     // 1. Version

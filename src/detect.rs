@@ -5,9 +5,7 @@ use std::time::{Duration, Instant};
 
 use regex::Regex;
 
-use crate::network::{
-    get_portal, make_client, parse_host_from_url, parse_magic_from_url, FALLBACK_HOST,
-};
+use crate::network::{get_portal, make_client, parse_host_from_url, parse_magic_from_url};
 use crate::session::load_session;
 use crate::types::FortinetDetectionResult;
 
@@ -126,10 +124,12 @@ pub fn detect_fortinet_network() -> FortinetDetectionResult {
     }
 
     // Probe 2: Gateway port & TLS probe
-    let mut gateway_candidates = vec![FALLBACK_HOST.to_string()];
+    let config = crate::config::load_config();
+    let mut gateway_candidates = vec![config.portal_host.clone()];
     if let Some(gw) = get_default_gateway_hint() {
-        gateway_candidates.insert(0, format!("{}:1000", gw));
-        gateway_candidates.insert(0, format!("{}:1003", gw));
+        for port in &config.gateway_ports {
+            gateway_candidates.insert(0, format!("{}:{}", gw, port));
+        }
     }
 
     for target in &gateway_candidates {

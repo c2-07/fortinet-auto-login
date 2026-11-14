@@ -93,6 +93,7 @@ pub fn test_internet_connectivity(timeout: Duration) -> bool {
         .max_redirects(0)
         .build();
     let client: ureq::Agent = config.into();
+    let app_cfg = crate::config::load_config();
 
     // Probe 1: Direct Cloudflare trace IP query
     if let Ok(res) = client.get("https://1.1.1.1/cdn-cgi/trace").call() {
@@ -101,20 +102,13 @@ pub fn test_internet_connectivity(timeout: Duration) -> bool {
         }
     }
 
-    // Probe 2: Standard Firefox captive portal probe
-    if let Ok(res) = client
-        .get("http://detectportal.firefox.com/success.txt")
-        .call()
-    {
-        if res.status() == 200 {
-            return true;
-        }
-    }
-
-    // Probe 3: Cloudflare 204
-    if let Ok(res) = client.get("https://cp.cloudflare.com/generate_204").call() {
-        if res.status() == 200 || res.status() == 204 {
-            return true;
+    // Probe 2..N: Standard & fallback probe URLs (Firefox, Google 204, Apple, Microsoft, Cloudflare)
+    for url in &app_cfg.check_urls {
+        if let Ok(res) = client.get(url).call() {
+            let status = res.status();
+            if status == 200 || status == 204 {
+                return true;
+            }
         }
     }
 

@@ -6,6 +6,7 @@ use regex::Regex;
 use ureq::config::Config;
 use ureq::tls::TlsConfig;
 
+use crate::config::{load_config, DEFAULT_PORTAL_HOST};
 use crate::credentials::delete_credentials;
 use crate::error::AppError;
 use crate::logf;
@@ -13,7 +14,11 @@ use crate::session::{clear_session, extract_countdown, load_session, random_magi
 use crate::types::Session;
 
 pub const CHECK_URL: &str = "http://detectportal.firefox.com/";
-pub const FALLBACK_HOST: &str = "192.168.55.253:1003";
+pub const FALLBACK_HOST: &str = DEFAULT_PORTAL_HOST;
+
+pub fn get_fallback_host() -> String {
+    load_config().portal_host
+}
 const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/138.0 Safari/537.36";
 
 static PORTAL_PATTERNS: LazyLock<Vec<Regex>> = LazyLock::new(|| {
@@ -30,9 +35,10 @@ static MAGIC_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"magic=([a-fA-F0
 static HOST_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"https?://([^/]+)").unwrap());
 
 pub fn make_client() -> ureq::Agent {
+    let timeout_secs = crate::config::load_config().request_timeout_secs;
     let tls_config = TlsConfig::builder().disable_verification(true).build();
     let config = Config::builder()
-        .timeout_global(Some(Duration::from_millis(5000)))
+        .timeout_global(Some(Duration::from_secs(timeout_secs)))
         .max_redirects(0)
         .tls_config(tls_config)
         .build();
@@ -60,35 +66,63 @@ where
 }
 
 pub fn get_check_url() -> String {
-    std::env::var("FORTINET_CHECK_URL").unwrap_or_else(|_| CHECK_URL.to_string())
+    let cfg = load_config();
+    cfg.check_urls
+        .first()
+        .cloned()
+        .unwrap_or_else(|| CHECK_URL.to_string())
 }
 
 pub fn get_portal(client: &ureq::Agent) -> Result<(Option<String>, bool), AppError> {
-    let check_url = get_check_url();
-    let resp = do_with_retry(3, || client.get(&check_url).call());
+    let config = load_config();
+    let mut last_err = None;
 
-    match resp {
-        Ok(mut res) => {
-            let body = res.body_mut().read_to_string().unwrap_or_default();
-            let trimmed = body.trim();
-            if trimmed == "success" {
-                return Ok((None, true));
-            }
+    for url in &config.check_urls {
+        match do_with_retry(1, || client.get(url).call()) {
+            Ok(mut res) => {
+                let status = res.status();
+                let body = res.body_mut().read_to_string().unwrap_or_default();
+                let trimmed = body.trim();
 
-            if let Some(url) = extract_portal_url(&body) {
-                return Ok((Some(url), false));
-            }
+                let is_online = (status == 204)
+                    || (status == 200
+                        && (trimmed == "success"
+                            || body.contains("<TITLE>Success</TITLE>")
+                            || body.contains("Microsoft Connect Test")));
 
-            // Also check Location header in case of HTTP redirect
-            if let Some(loc) = res.headers().get("location") {
-                if let Ok(loc_str) = loc.to_str() {
-                    return Ok((Some(loc_str.to_string()), false));
+                if is_online {
+                    return Ok((None, true));
+                }
+
+                if let Some(portal) = extract_portal_url(&body) {
+                    return Ok((Some(portal), false));
+                }
+
+                if let Some(loc) = res.headers().get("location") {
+                    if let Ok(loc_str) = loc.to_str() {
+                        return Ok((Some(loc_str.to_string()), false));
+                    }
+                }
+
+                if body.to_lowercase().contains("fortigate")
+                    || body.to_lowercase().contains("fgtauth")
+                {
+                    return Ok((
+                        Some(format!("https://{}/fgtauth", config.portal_host)),
+                        false,
+                    ));
                 }
             }
-
-            Ok((None, false))
+            Err(e) => {
+                last_err = Some(e);
+            }
         }
-        Err(e) => Err(e),
+    }
+
+    if let Some(err) = last_err {
+        Err(err)
+    } else {
+        Ok((None, false))
     }
 }
 
@@ -167,7 +201,7 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
             random_magic()
         }
     });
-    let host = parse_host_from_url(&portal_url).unwrap_or_else(|| FALLBACK_HOST.to_string());
+    let host = parse_host_from_url(&portal_url).unwrap_or_else(get_fallback_host);
 
     let post_url = if let Some(pos) = portal_url.find('?') {
         portal_url[..pos].to_string()
