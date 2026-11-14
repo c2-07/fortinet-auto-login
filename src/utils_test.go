@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"runtime"
 	"testing"
 )
 
@@ -58,9 +59,13 @@ func TestCredentialsSaveAndLoad(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Set HOME so credentialsFilePath() uses it
+	// Set HOME and USERPROFILE so credentialsFilePath() uses it across platforms
 	os.Setenv("HOME", tempDir)
-	defer os.Unsetenv("HOME")
+	os.Setenv("USERPROFILE", tempDir)
+	defer func() {
+		os.Unsetenv("HOME")
+		os.Unsetenv("USERPROFILE")
+	}()
 
 	// 1. Initially, no credentials should exist
 	_, ok := loadCredentials()
@@ -81,7 +86,7 @@ func TestCredentialsSaveAndLoad(t *testing.T) {
 	if err != nil {
 		t.Fatalf("credentials file was not created: %v", err)
 	}
-	if info.Mode().Perm() != 0600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 		t.Errorf("expected permissions 0600, got %v", info.Mode().Perm())
 	}
 
