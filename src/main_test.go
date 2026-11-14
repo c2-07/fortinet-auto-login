@@ -183,75 +183,193 @@ func TestNetworkAndDaemonFlags(t *testing.T) {
 }
 
 func TestServiceMode(t *testing.T) {
-	if runtime.GOOS != "darwin" {
-		t.Skip("Skipping macOS service install test on non-darwin platform")
-	}
+	t.Run("darwin", func(t *testing.T) {
+		if runtime.GOOS != "darwin" {
+			t.Skip("Skipping macOS service install test on non-darwin platform")
+		}
 
-	fakeHome := t.TempDir()
+		fakeHome := t.TempDir()
 
-	// The launch agent directory needs to exist in the fake home
-	launchAgentsDir := filepath.Join(fakeHome, "Library", "LaunchAgents")
-	err := os.MkdirAll(launchAgentsDir, 0755)
-	if err != nil {
-		t.Fatalf("failed to create fake LaunchAgents dir: %v", err)
-	}
+		// The launch agent directory needs to exist in the fake home
+		launchAgentsDir := filepath.Join(fakeHome, "Library", "LaunchAgents")
+		err := os.MkdirAll(launchAgentsDir, 0755)
+		if err != nil {
+			t.Fatalf("failed to create fake LaunchAgents dir: %v", err)
+		}
 
-	// Fake credentials to bypass prompt
-	appDir := filepath.Join(fakeHome, ".fortinet-autologin")
-	os.MkdirAll(appDir, 0700)
-	credPath := filepath.Join(appDir, "credentials.json")
-	os.WriteFile(credPath, []byte(`{"username":"testuser","password":"testpass"}`), 0600)
+		// Fake credentials to bypass prompt
+		appDir := filepath.Join(fakeHome, ".fortinet-autologin")
+		os.MkdirAll(appDir, 0700)
+		credPath := filepath.Join(appDir, "credentials.json")
+		os.WriteFile(credPath, []byte(`{"username":"testuser","password":"testpass"}`), 0600)
 
-	// Test Installation
-	cmd := exec.Command(binPath, "-install")
-	cmd.Env = append(os.Environ(), "HOME="+fakeHome)
+		// Test Installation
+		cmd := exec.Command(binPath, "-install")
+		cmd.Env = append(os.Environ(), "HOME="+fakeHome)
 
-	var stdout bytes.Buffer
-	cmd.Stdout = &stdout
-	cmd.Stderr = &stdout
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stdout
 
-	// It's expected that launchctl load might fail since the paths are fake,
-	// so we just run it and check if the file was created successfully.
-	cmd.Run()
+		// launchctl load may fail with fake paths, so just verify file creation
+		cmd.Run()
 
-	plistPath := filepath.Join(launchAgentsDir, "com.fortinet.autologin.plist")
-	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
-		t.Fatalf("LaunchAgent plist was not created at %s\nOutput: %s", plistPath, stdout.String())
-	}
+		plistPath := filepath.Join(launchAgentsDir, "com.fortinet.autologin.plist")
+		if _, err := os.Stat(plistPath); os.IsNotExist(err) {
+			t.Fatalf("LaunchAgent plist was not created at %s\nOutput: %s", plistPath, stdout.String())
+		}
 
-	content, err := os.ReadFile(plistPath)
-	if err != nil {
-		t.Fatalf("failed to read plist: %v", err)
-	}
+		content, err := os.ReadFile(plistPath)
+		if err != nil {
+			t.Fatalf("failed to read plist: %v", err)
+		}
 
-	if !strings.Contains(string(content), binPath) {
-		t.Errorf("plist does not contain the binary path: %s", string(content))
-	}
-	if !strings.Contains(string(content), "-auto") {
-		t.Errorf("plist does not contain the -auto flag: %s", string(content))
-	}
-	if !strings.Contains(string(content), "StartInterval") {
-		t.Errorf("plist should contain StartInterval for the 30s session watchdog")
-	}
-	if !strings.Contains(string(content), "com.apple.airport.preferences.plist") {
-		t.Errorf("plist should watch com.apple.airport.preferences.plist for Wi-Fi state changes")
-	}
+		if !strings.Contains(string(content), binPath) {
+			t.Errorf("plist does not contain the binary path: %s", string(content))
+		}
+		if !strings.Contains(string(content), "-auto") {
+			t.Errorf("plist does not contain the -auto flag: %s", string(content))
+		}
+		if !strings.Contains(string(content), "StartInterval") {
+			t.Errorf("plist should contain StartInterval for the 30s session watchdog")
+		}
+		if !strings.Contains(string(content), "com.apple.airport.preferences.plist") {
+			t.Errorf("plist should watch com.apple.airport.preferences.plist for Wi-Fi state changes")
+		}
 
-	// Test Uninstallation
-	cmdUninstall := exec.Command(binPath, "-uninstall")
-	cmdUninstall.Env = append(os.Environ(), "HOME="+fakeHome)
+		// Test Uninstallation
+		cmdUninstall := exec.Command(binPath, "-service-uninstall")
+		cmdUninstall.Env = append(os.Environ(), "HOME="+fakeHome)
 
-	var stdoutUninstall bytes.Buffer
-	cmdUninstall.Stdout = &stdoutUninstall
-	cmdUninstall.Stderr = &stdoutUninstall
+		var stdoutUninstall bytes.Buffer
+		cmdUninstall.Stdout = &stdoutUninstall
+		cmdUninstall.Stderr = &stdoutUninstall
 
-	cmdUninstall.Run()
+		cmdUninstall.Run()
 
-	if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
-		t.Fatalf("LaunchAgent plist was not removed after -uninstall\nOutput: %s", stdoutUninstall.String())
-	}
+		if _, err := os.Stat(plistPath); !os.IsNotExist(err) {
+			t.Fatalf("LaunchAgent plist was not removed after uninstall\nOutput: %s", stdoutUninstall.String())
+		}
 
-	if !strings.Contains(stdoutUninstall.String(), "Uninstalled successfully") {
-		t.Errorf("Expected success message, got: %s", stdoutUninstall.String())
-	}
+		if !strings.Contains(stdoutUninstall.String(), "Uninstalled successfully") {
+			t.Errorf("Expected success message, got: %s", stdoutUninstall.String())
+		}
+	})
+
+	t.Run("linux", func(t *testing.T) {
+		if runtime.GOOS != "linux" {
+			t.Skip("Skipping Linux service install test on non-linux platform")
+		}
+
+		fakeHome := t.TempDir()
+
+		// Fake credentials to bypass prompt
+		appDir := filepath.Join(fakeHome, ".fortinet-autologin")
+		os.MkdirAll(appDir, 0700)
+		credPath := filepath.Join(appDir, "credentials.json")
+		os.WriteFile(credPath, []byte(`{"username":"testuser","password":"testpass"}`), 0600)
+
+		// Test Installation
+		cmd := exec.Command(binPath, "-install")
+		cmd.Env = append(os.Environ(), "HOME="+fakeHome)
+
+		var stdout bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stdout
+
+		cmd.Run()
+
+		servicePath := filepath.Join(fakeHome, ".config", "systemd", "user", "fortinet-autologin.service")
+		if _, err := os.Stat(servicePath); os.IsNotExist(err) {
+			t.Fatalf("systemd service file was not created at %s\nOutput: %s", servicePath, stdout.String())
+		}
+
+		// Test Uninstallation
+		cmdUninstall := exec.Command(binPath, "-service-uninstall")
+		cmdUninstall.Env = append(os.Environ(), "HOME="+fakeHome)
+
+		var stdoutUninstall bytes.Buffer
+		cmdUninstall.Stdout = &stdoutUninstall
+		cmdUninstall.Stderr = &stdoutUninstall
+
+		cmdUninstall.Run()
+
+		if _, err := os.Stat(servicePath); !os.IsNotExist(err) {
+			t.Fatalf("systemd service file was not removed after uninstall\nOutput: %s", stdoutUninstall.String())
+		}
+	})
+
+	t.Run("windows", func(t *testing.T) {
+		if runtime.GOOS != "windows" {
+			t.Skip("Skipping Windows service test on non-windows platform")
+		}
+
+		fakeHome := t.TempDir()
+
+		// Fake credentials to bypass prompt
+		appDir := filepath.Join(fakeHome, ".fortinet-autologin")
+		os.MkdirAll(appDir, 0700)
+		credPath := filepath.Join(appDir, "credentials.json")
+		os.WriteFile(credPath, []byte(`{"username":"testuser","password":"testpass"}`), 0600)
+
+		// Ensure task is deleted on exit
+		defer func() {
+			_ = exec.Command("schtasks", "/end", "/tn", "FortinetAutoLogin").Run()
+			_ = exec.Command("schtasks", "/delete", "/tn", "FortinetAutoLogin", "/f").Run()
+		}()
+
+		// 1. Test Installation (-service install / -install)
+		cmdInstall := exec.Command(binPath, "-service", "install")
+		cmdInstall.Env = append(os.Environ(),
+			"HOME="+fakeHome,
+			"USERPROFILE="+fakeHome,
+		)
+
+		var stdoutInstall bytes.Buffer
+		cmdInstall.Stdout = &stdoutInstall
+		cmdInstall.Stderr = &stdoutInstall
+
+		err := cmdInstall.Run()
+		outputInstall := stdoutInstall.String()
+		if err != nil {
+			t.Fatalf("autologin -service install failed: %v\nOutput: %s", err, outputInstall)
+		}
+
+		if !strings.Contains(outputInstall, "Windows Task Scheduler background service installed") {
+			t.Errorf("expected success message in output, got: %s", outputInstall)
+		}
+
+		// Verify task exists via schtasks /query
+		cmdQuery := exec.Command("schtasks", "/query", "/tn", "FortinetAutoLogin")
+		if out, err := cmdQuery.CombinedOutput(); err != nil {
+			t.Fatalf("schtasks /query failed to find FortinetAutoLogin task: %v\nOutput: %s", err, string(out))
+		}
+
+		// 2. Test Uninstallation (-service uninstall)
+		cmdUninstall := exec.Command(binPath, "-service", "uninstall")
+		cmdUninstall.Env = append(os.Environ(),
+			"HOME="+fakeHome,
+			"USERPROFILE="+fakeHome,
+		)
+
+		var stdoutUninstall bytes.Buffer
+		cmdUninstall.Stdout = &stdoutUninstall
+		cmdUninstall.Stderr = &stdoutUninstall
+
+		err = cmdUninstall.Run()
+		outputUninstall := stdoutUninstall.String()
+		if err != nil {
+			t.Fatalf("autologin -service uninstall failed: %v\nOutput: %s", err, outputUninstall)
+		}
+
+		if !strings.Contains(outputUninstall, "Windows background service uninstalled successfully") {
+			t.Errorf("expected uninstall success message, got: %s", outputUninstall)
+		}
+
+		// Verify task is deleted via schtasks /query
+		cmdQueryAfter := exec.Command("schtasks", "/query", "/tn", "FortinetAutoLogin")
+		if err := cmdQueryAfter.Run(); err == nil {
+			t.Errorf("expected FortinetAutoLogin task to be deleted, but schtasks /query succeeded")
+		}
+	})
 }
