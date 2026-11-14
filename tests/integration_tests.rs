@@ -60,7 +60,7 @@ where
 static TEST_ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 fn setup_test_env() -> std::sync::MutexGuard<'static, ()> {
-    let guard = TEST_ENV_LOCK.lock().unwrap();
+    let guard = TEST_ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let nanos = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -68,6 +68,7 @@ fn setup_test_env() -> std::sync::MutexGuard<'static, ()> {
     let tmp = std::env::temp_dir().join(format!("fortinet_test_{}", nanos));
     let _ = std::fs::create_dir_all(&tmp);
     std::env::set_var("FORTINET_CONFIG_DIR", tmp);
+    fortinet_lib::detect::invalidate_detection_cache();
     guard
 }
 
@@ -402,6 +403,7 @@ fn test_integration_reconnect_on_unexpected_logout() {
 
     // Phase 2: Unexpected Logout occurs (firewall drops session table / idle timeout)
     state.store(1, Ordering::SeqCst);
+    fortinet_lib::detect::invalidate_detection_cache();
 
     // Phase 3: Daemon / Watchdog tick runs
     // It must detect captive portal interception, automatically invoke login(), and restore connection
@@ -419,6 +421,7 @@ fn test_integration_reconnect_on_unexpected_logout() {
     assert_eq!(session.timeout, 14400);
 
     // Phase 5: Subsequent check confirms internet access is fully restored
+    fortinet_lib::detect::invalidate_detection_cache();
     let tick3 = daemon_tick("reauth_user", "reauth_pass", &mut last_connected, false);
     assert_eq!(
         tick3,
@@ -427,5 +430,6 @@ fn test_integration_reconnect_on_unexpected_logout() {
     );
 
     std::env::remove_var("FORTINET_CHECK_URL");
+    fortinet_lib::detect::invalidate_detection_cache();
     stop.store(true, Ordering::Relaxed);
 }

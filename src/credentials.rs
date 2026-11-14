@@ -68,6 +68,13 @@ pub fn delete_credentials() {
     let _ = fs::remove_file(path);
 }
 
+pub fn clear_saved_credentials() {
+    delete_credentials();
+    crate::session::clear_session();
+    println!("\x1b[32m[OK]\x1b[0m     Saved credentials and active session cache deleted.");
+    println!("\x1b[36m[INFO]\x1b[0m   You will be prompted for credentials on your next login.");
+}
+
 pub fn prompt_credentials() -> (String, String) {
     let stdin = io::stdin();
     let mut stdout = io::stdout();

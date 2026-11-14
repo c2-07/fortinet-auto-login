@@ -157,10 +157,21 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
     let (portal, already_connected) = match get_portal(&client) {
         Ok(res) => res,
         Err(e) => {
-            if !quiet {
-                logf!("\x1b[31m[FAIL]\x1b[0m   Network unreachable: {}", e);
+            // Fallback: When logged out, external DNS may be blackholed.
+            // Check if the local Fortinet gateway is directly reachable.
+            let host = get_fallback_host();
+            let direct_url = format!("https://{}/fgtauth", host);
+            if client.get(&direct_url).call().is_ok() {
+                (
+                    Some(format!("https://{}/fgtauth?{}", host, random_magic())),
+                    false,
+                )
+            } else {
+                if !quiet {
+                    logf!("\x1b[31m[FAIL]\x1b[0m   Network unreachable: {}", e);
+                }
+                return false;
             }
-            return false;
         }
     };
 
@@ -174,10 +185,8 @@ pub fn login(quiet: bool, is_retry: bool, username: &str, password: &str) -> boo
     let portal_url = match portal {
         Some(u) => u,
         None => {
-            if !quiet {
-                logf!("\x1b[31m[FAIL]\x1b[0m   Captive portal redirect URL not found");
-            }
-            return false;
+            let host = get_fallback_host();
+            format!("https://{}/fgtauth?{}", host, random_magic())
         }
     };
 
