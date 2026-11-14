@@ -2,7 +2,7 @@ use std::env;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use std::path::PathBuf;
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 pub const LOG_PATH: &str = "/tmp/autologin.log";
 
@@ -106,9 +106,13 @@ fn install_macos_launch_agent() {
     let plist_str = plist_path.to_string_lossy();
     let _ = Command::new("launchctl")
         .args(["unload", &plist_str])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     let status = Command::new("launchctl")
         .args(["load", &plist_str])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
 
     match status {
@@ -131,6 +135,8 @@ fn uninstall_macos_launch_agent() {
     let plist_str = plist_path.to_string_lossy();
     let _ = Command::new("launchctl")
         .args(["unload", &plist_str])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     let _ = fs::remove_file(&plist_path);
     println!("\x1b[32m[OK]\x1b[0m     macOS LaunchAgent removed successfully");
@@ -186,9 +192,13 @@ WantedBy=default.target
 
     let _ = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     let status = Command::new("systemctl")
         .args(["--user", "enable", "--now", "fortinet-autologin.service"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
 
     match status {
@@ -208,11 +218,15 @@ WantedBy=default.target
 fn uninstall_linux_systemd_service() {
     let _ = Command::new("systemctl")
         .args(["--user", "disable", "--now", "fortinet-autologin.service"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     let service_path = get_systemd_service_path();
     let _ = fs::remove_file(service_path);
     let _ = Command::new("systemctl")
         .args(["--user", "daemon-reload"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     println!("\x1b[32m[OK]\x1b[0m     Linux systemd service uninstalled successfully");
 }

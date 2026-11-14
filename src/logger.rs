@@ -76,3 +76,22 @@ macro_rules! logf {
         $crate::logger::log_raw(&format!($($arg)*))
     };
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_strip_ansi_escapes() {
+        let text = "\x1b[32m[OK]\x1b[0m     Success!";
+        assert_eq!(strip_ansi_escapes(text), "[OK]     Success!");
+    }
+
+    #[test]
+    fn test_timestamp_format() {
+        let ts = get_timestamp();
+        assert_eq!(ts.len(), 8);
+        assert_eq!(&ts[2..3], ":");
+        assert_eq!(&ts[5..6], ":");
+    }
+}

@@ -15,7 +15,7 @@ struct GitHubRelease {
 
 pub fn check_upgrade() -> bool {
     logf!(
-        "\x1b[36m[UPGRADE]\x1b[0m Checking for updates (current version: v{})...",
+        "\x1b[36m[UPDATE]\x1b[0m Checking for updates (current version: v{})...",
         CURRENT_VERSION
     );
 
@@ -55,7 +55,10 @@ pub fn check_upgrade() -> bool {
                     release.tag_name,
                     CURRENT_VERSION
                 );
-                logf!("         Download release from: {}", release.html_url);
+                logf!(
+                    "\x1b[36m[INFO]\x1b[0m   Download release from: {}",
+                    release.html_url
+                );
             }
             true
         }

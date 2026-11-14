@@ -1,11 +1,21 @@
 use std::net::UdpSocket;
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::Duration;
 
 use crate::detect::detect_fortinet_network;
 use crate::logf;
 use crate::network::login;
+
+fn run_warp_cli(args: &[&str]) -> bool {
+    Command::new("warp-cli")
+        .args(args)
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
 
 pub const WARP_ANYCAST_IPS: [&str; 12] = [
     "162.159.192.1",
@@ -158,6 +168,8 @@ fn cycle_wifi_darwin() -> bool {
 
     let off = Command::new("networksetup")
         .args(["-setairportpower", &wifi_device, "off"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     if off.is_err() {
         return false;
@@ -167,6 +179,8 @@ fn cycle_wifi_darwin() -> bool {
 
     let on = Command::new("networksetup")
         .args(["-setairportpower", &wifi_device, "on"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     matches!(on, Ok(s) if s.success())
 }
@@ -175,23 +189,34 @@ fn cycle_wifi_darwin() -> bool {
 fn cycle_wifi_linux() -> bool {
     if let Ok(s) = Command::new("nmcli")
         .args(["radio", "wifi", "off"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
     {
         if s.success() {
             thread::sleep(Duration::from_secs(2));
             return Command::new("nmcli")
                 .args(["radio", "wifi", "on"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
         }
     }
 
-    if let Ok(s) = Command::new("rfkill").args(["block", "wifi"]).status() {
+    if let Ok(s) = Command::new("rfkill")
+        .args(["block", "wifi"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+    {
         if s.success() {
             thread::sleep(Duration::from_secs(2));
             return Command::new("rfkill")
                 .args(["unblock", "wifi"])
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
                 .status()
                 .map(|s| s.success())
                 .unwrap_or(false);
@@ -206,6 +231,8 @@ fn cycle_wifi_windows() -> bool {
     let ps_script = "Get-NetAdapter -Name *Wi-Fi* | Disable-NetAdapter -Confirm:$false; Start-Sleep -Seconds 2; Get-NetAdapter -Name *Wi-Fi* | Enable-NetAdapter -Confirm:$false";
     let status = Command::new("powershell")
         .args(["-NoProfile", "-NonInteractive", "-Command", ps_script])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     if let Ok(s) = status {
         if s.success() {
@@ -215,10 +242,14 @@ fn cycle_wifi_windows() -> bool {
 
     let _ = Command::new("netsh")
         .args(["interface", "set", "interface", "Wi-Fi", "disable"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status();
     thread::sleep(Duration::from_secs(2));
     Command::new("netsh")
         .args(["interface", "set", "interface", "Wi-Fi", "enable"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
@@ -228,15 +259,15 @@ fn recover_via_wifi_cycle(username: &str, password: &str) -> bool {
     logf!("\x1b[33m[WARN]\x1b[0m   WARP tunnel connected but internet traffic is blackholed by FortiGate.");
     logf!("\x1b[36m[ACTION]\x1b[0m Automatically restarting Wi-Fi to renew DHCP lease and reset firewall session table...");
 
-    let _ = Command::new("warp-cli").arg("disconnect").status();
+    run_warp_cli(&["disconnect"]);
     thread::sleep(Duration::from_millis(500));
 
     if !cycle_wifi() {
         logf!("\x1b[33m[INFO]\x1b[0m   Could not toggle Wi-Fi automatically (system permission required).");
         logf!(
-            "         Please toggle Wi-Fi OFF and ON in system settings to refresh your DHCP IP,"
+            "\x1b[33m[INFO]\x1b[0m   Please toggle Wi-Fi OFF and ON in system settings to refresh your DHCP IP,"
         );
-        logf!("         then re-run './autologin' and './autologin -warp'.");
+        logf!("\x1b[33m[INFO]\x1b[0m   then re-run './autologin' and './autologin -warp'.");
         return false;
     }
 
@@ -262,10 +293,8 @@ fn recover_via_wifi_cycle(username: &str, password: &str) -> bool {
         "\x1b[36m[WARP]\x1b[0m   Retrying Cloudflare WARP with fresh IP and clean session table..."
     );
     for ep in &recovery_endpoints {
-        let _ = Command::new("warp-cli")
-            .args(["tunnel", "endpoint", "set", ep])
-            .status();
-        let _ = Command::new("warp-cli").arg("connect").status();
+        run_warp_cli(&["tunnel", "endpoint", "set", ep]);
+        run_warp_cli(&["connect"]);
 
         for _ in 0..5 {
             thread::sleep(Duration::from_millis(800));
@@ -279,7 +308,7 @@ fn recover_via_wifi_cycle(username: &str, password: &str) -> bool {
                 }
             }
         }
-        let _ = Command::new("warp-cli").arg("disconnect").status();
+        run_warp_cli(&["disconnect"]);
     }
 
     logf!("\x1b[31m[FAIL]\x1b[0m   Unable to restore WARP connection. Tunnel safely disconnected.");
@@ -313,7 +342,7 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
         }
     } else {
         logf!("\x1b[33m[WARN]\x1b[0m   No Fortinet gateway signature detected on this network.");
-        logf!("         (WARP auto-rotation is specifically optimized for evading Fortinet firewall restrictions).");
+        logf!("\x1b[33m[INFO]\x1b[0m   (WARP auto-rotation is specifically optimized for evading Fortinet firewall restrictions).");
     }
 
     // Step 2: Check warp-cli presence
@@ -323,24 +352,20 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
         return false;
     }
 
-    let _ = Command::new("warp-cli")
-        .args(["debug", "connectivity-check", "disable"])
-        .status();
-    let _ = Command::new("warp-cli")
-        .args(["tunnel", "protocol", "set", "WireGuard"])
-        .status();
+    run_warp_cli(&["debug", "connectivity-check", "disable"]);
+    run_warp_cli(&["tunnel", "protocol", "set", "WireGuard"]);
 
     // Step 3: Check if already connected and verify live internet
     if let Ok(output) = Command::new("warp-cli").arg("status").output() {
         let status_str = String::from_utf8_lossy(&output.stdout);
         if status_str.contains("Connected") {
-            logf!("  Checking existing WARP connection health...");
+            logf!("\x1b[36m[WARP]\x1b[0m   Checking existing WARP connection health...");
             if test_internet_connectivity(Duration::from_secs(3)) {
                 logf!("\x1b[32m[OK]\x1b[0m     WARP is already connected and internet is fully reachable!");
                 return true;
             }
             logf!("\x1b[33m[WARN]\x1b[0m   WARP is connected but internet traffic is stalled. Disconnecting to rotate...");
-            let _ = Command::new("warp-cli").arg("disconnect").status();
+            run_warp_cli(&["disconnect"]);
             thread::sleep(Duration::from_millis(200));
         }
     }
@@ -348,7 +373,7 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
     logf!("\x1b[36m[WARP]\x1b[0m   Initializing intelligent Cloudflare WARP auto-rotation...");
     let endpoints = generate_candidate_endpoints();
     logf!(
-        "  Generated {} candidate endpoint combinations across {} Anycast IP pools",
+        "\x1b[36m[WARP]\x1b[0m   Generated {} candidate endpoint combinations across {} Anycast IP pools",
         endpoints.len(),
         WARP_ANYCAST_IPS.len()
     );
@@ -368,13 +393,11 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
             i + 1,
             ep
         );
-        let _ = Command::new("warp-cli").arg("disconnect").status();
+        run_warp_cli(&["disconnect"]);
         thread::sleep(Duration::from_millis(100));
 
-        let _ = Command::new("warp-cli")
-            .args(["tunnel", "endpoint", "set", ep])
-            .status();
-        let _ = Command::new("warp-cli").arg("connect").status();
+        run_warp_cli(&["tunnel", "endpoint", "set", ep]);
+        run_warp_cli(&["connect"]);
 
         let mut connected = false;
         for attempt in 0..6 {
@@ -396,7 +419,10 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
         }
 
         if connected {
-            logf!("  Verifying internet reachability through {}...", ep);
+            logf!(
+                "\x1b[34m[WARP]\x1b[0m   Verifying internet reachability through {}...",
+                ep
+            );
             if test_internet_connectivity(Duration::from_secs(3)) {
                 logf!("\x1b[32m[OK]\x1b[0m     Success! Connected to Cloudflare WARP via {} (Internet verified active)", ep);
                 return true;
@@ -412,13 +438,9 @@ pub fn fix_and_connect_warp(username: &str, password: &str) -> bool {
 
     // Step 5: Tunnel key rotation attempt
     logf!("\x1b[34m[WARP]\x1b[0m   Rotating tunnel cryptographic keys...");
-    let _ = Command::new("warp-cli")
-        .args(["tunnel", "rotate-keys"])
-        .status();
-    let _ = Command::new("warp-cli")
-        .args(["tunnel", "endpoint", "set", "162.159.192.1:500"])
-        .status();
-    let _ = Command::new("warp-cli").arg("connect").status();
+    run_warp_cli(&["tunnel", "rotate-keys"]);
+    run_warp_cli(&["tunnel", "endpoint", "set", "162.159.192.1:500"]);
+    run_warp_cli(&["connect"]);
 
     thread::sleep(Duration::from_secs(2));
     if let Ok(output) = Command::new("warp-cli").arg("status").output() {
