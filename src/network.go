@@ -30,7 +30,7 @@ func makeClient() *http.Client {
 	}
 	return &http.Client{
 		Transport: transport,
-		Timeout:   10 * time.Second,
+		Timeout:   4 * time.Second,
 		// Don't follow redirects automatically — mirrors allow_redirects=False.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -39,7 +39,7 @@ func makeClient() *http.Client {
 }
 
 // doWithRetry retries a request-building function up to `retries` times,
-// mirroring the Python urllib3 Retry(total=5, backoff_factor=1).
+// with fast backoff suitable for local network captive portal interactions.
 func doWithRetry(client *http.Client, buildReq func() (*http.Request, error), retries int) (*http.Response, error) {
 	var lastErr error
 	for attempt := 0; attempt <= retries; attempt++ {
@@ -53,41 +53,97 @@ func doWithRetry(client *http.Client, buildReq func() (*http.Request, error), re
 		}
 		lastErr = err
 		if attempt < retries {
-			backoff := time.Duration(attempt+1) * time.Second
+			backoff := time.Duration(250*(attempt+1)) * time.Millisecond
 			time.Sleep(backoff)
 		}
 	}
 	return nil, lastErr
 }
 
+// probeDirectGateway queries the local gateway IP directly when external DNS is
+// blackholed or unreachable, returning the captive portal redirect URL in <20ms.
+func probeDirectGateway(client *http.Client) (string, error) {
+	gwHost := getEffectivePortalHost()
+	gwIP := strings.Split(gwHost, ":")[0]
+	if gwIP == "" {
+		gwIP = "192.168.55.253"
+	}
+
+	candidates := []string{gwIP}
+	if defaultGW := getDefaultGatewayHint(); defaultGW != "" && defaultGW != gwIP {
+		candidates = append(candidates, defaultGW)
+	}
+
+	for _, ip := range candidates {
+		// 1. Direct HTTP probe to FortiGate captive portal redirect port 1000
+		directURL := fmt.Sprintf("http://%s:1000/", ip)
+		req, err := http.NewRequest(http.MethodGet, directURL, nil)
+		if err == nil {
+			resp, err := client.Do(req)
+			if err == nil {
+				body, _ := io.ReadAll(resp.Body)
+				resp.Body.Close()
+				if matches := portalRe.FindStringSubmatch(string(body)); len(matches) > 1 {
+					return matches[1], nil
+				}
+			}
+		}
+	}
+
+	// 2. Direct HTTPS probe to FortiGate auth port
+	portalURL := fmt.Sprintf("https://%s/fgtauth", gwHost)
+	reqTLS, err := http.NewRequest(http.MethodGet, portalURL, nil)
+	if err == nil {
+		respTLS, errTLS := client.Do(reqTLS)
+		if errTLS == nil {
+			io.Copy(io.Discard, respTLS.Body)
+			respTLS.Body.Close()
+			if respTLS.StatusCode == http.StatusOK || respTLS.StatusCode == http.StatusFound {
+				return portalURL, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("direct gateway probe failed")
+}
+
 func getPortal(client *http.Client) (string, bool, error) {
 	resp, err := doWithRetry(client, func() (*http.Request, error) {
 		req, err := http.NewRequest(http.MethodGet, checkURL, nil)
 		return req, err
-	}, 5)
-	if err != nil {
-		return "", false, nil // couldn't reach it
-	}
-	defer resp.Body.Close()
+	}, 2)
+	if err == nil {
+		defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNoContent {
-		return "", true, nil
+		if resp.StatusCode == http.StatusNoContent {
+			return "", true, nil
+		}
+
+		body, err := io.ReadAll(resp.Body)
+		if err == nil {
+			text := strings.TrimSpace(string(body))
+			if text == "success" {
+				return "", true, nil
+			}
+
+			matches := portalRe.FindStringSubmatch(text)
+			if len(matches) > 1 {
+				return matches[1], false, nil
+			}
+		}
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	// Fallback to direct gateway IP probe if external probe failed or times out
+	// (e.g. when logged out and external DNS is blocked).
+	directPortal, errDirect := probeDirectGateway(client)
+	if errDirect == nil && directPortal != "" {
+		return directPortal, false, nil
+	}
+
 	if err != nil {
 		return "", false, err
 	}
-	text := strings.TrimSpace(string(body))
-	if text == "success" {
-		return "", true, nil
-	}
-
-	matches := portalRe.FindStringSubmatch(text)
-	if matches == nil {
-		return "", false, nil
-	}
-	return matches[1], false, nil
+	return "", false, nil
 }
 
 func login(quiet bool, isRetry bool) bool {
@@ -118,7 +174,7 @@ func login(quiet bool, isRetry bool) bool {
 	// Visit the portal first to establish cookies/session.
 	pageResp, err := doWithRetry(client, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, portal, nil)
-	}, 5)
+	}, 2)
 	if err != nil {
 		logf("Failed to load login page.")
 		return false
@@ -139,14 +195,27 @@ func login(quiet bool, isRetry bool) bool {
 		return false
 	}
 
+	magicToken := parsedPortal.RawQuery
+	if magicToken == "" {
+		magicToken = randomMagic()
+	}
+
 	form := url.Values{}
 	form.Set("4Tredir", "http://google.com/")
-	form.Set("magic", parsedPortal.RawQuery)
+	form.Set("magic", magicToken)
 	form.Set("username", username)
 	form.Set("password", password)
 
 	postURL := strings.SplitN(portal, "?", 2)[0]
-	origin := fmt.Sprintf("%s://%s", parsedPortal.Scheme, parsedPortal.Host)
+	scheme := parsedPortal.Scheme
+	if scheme == "" {
+		scheme = fallbackScheme
+	}
+	host := parsedPortal.Host
+	if host == "" {
+		host = getEffectivePortalHost()
+	}
+	origin := fmt.Sprintf("%s://%s", scheme, host)
 
 	resp, err := doWithRetry(client, func() (*http.Request, error) {
 		req, err := http.NewRequest(http.MethodPost, postURL, strings.NewReader(form.Encode()))
@@ -161,7 +230,7 @@ func login(quiet bool, isRetry bool) bool {
 				"AppleWebKit/537.36 (KHTML, like Gecko) "+
 				"Chrome/138.0 Safari/537.36")
 		return req, nil
-	}, 5)
+	}, 2)
 	if err != nil {
 		logf("Login request failed.")
 		return false
@@ -215,9 +284,9 @@ func login(quiet bool, isRetry bool) bool {
 	// The magic used for logout/keepalive is the same one used for login,
 	// carried in the portal URL's query string.
 	s := session{
-		Scheme:    parsedPortal.Scheme,
-		Host:      parsedPortal.Host,
-		Magic:     parsedPortal.RawQuery,
+		Scheme:    scheme,
+		Host:      host,
+		Magic:     magicToken,
 		Countdown: extractCountdown(text),
 	}
 	saveSession(s)
@@ -238,7 +307,12 @@ func logout() bool {
 	client := makeClient()
 	resp, err := doWithRetry(client, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, logoutURL, nil)
-	}, 5)
+	}, 2)
+
+	// Clean up local session and invalidate detection cache immediately
+	clearSession()
+	InvalidateDetectionCache()
+
 	if err != nil {
 		logf("\033[31m[FAIL]\033[0m   Logout request failed")
 		return false

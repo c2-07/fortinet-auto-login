@@ -12,8 +12,8 @@ const (
 	DefaultPortalHost         = "192.168.55.253:1003"
 	DefaultCheckURL           = "http://cp.cloudflare.com/generate_204"
 	DefaultDaemonIntervalSecs = 45
-	DefaultRequestTimeoutSecs = 10
-	DefaultMaxRetries         = 3
+	DefaultRequestTimeoutSecs = 4
+	DefaultMaxRetries         = 2
 )
 
 var runtimeHostOverride string
