@@ -98,24 +98,19 @@ flowchart TD
 ### View Current Configuration
 ```bash
 autologin -config
-# or
-autologin -config show
 ```
 *Output:*
 ```text
-[CONFIG] Active Campus & Failover Configuration:
-  Config File:       /Users/username/.fortinet-autologin/config.json
-  Portal Host:       192.168.55.253:1003
-  Gateway Ports:     [1003, 1000]
-  Daemon Interval:   30s
-  Request Timeout:   5s
-  Max Retries:       3
-  Check URLs (5 prioritized probe endpoints):
-    1. http://detectportal.firefox.com/success.txt
-    2. http://connectivitycheck.gstatic.com/generate_204
-    3. http://captive.apple.com/hotspot-detect.html
-    4. http://www.msftconnecttest.com/connecttest.txt
-    5. http://cp.cloudflare.com/generate_204
+=== Campus & Engine Configuration ===
+Config File:          /Users/username/.fortinet-autologin/config.json
+Campus Gateway Host:  192.168.55.253:1003
+Gateway Probe Port:   1003 (HTTPS)
+Daemon Interval:      45s
+Request Timeout:      10s
+Max HTTP Retries:     3
+
+Connectivity Check Endpoints (Primary & Fallbacks):
+  [1] http://cp.cloudflare.com/generate_204 (Primary)
 ```
 
 ### Update Campus Gateway Host

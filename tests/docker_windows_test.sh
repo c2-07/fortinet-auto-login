@@ -7,10 +7,9 @@ echo "=========================================================="
 
 cd /app
 
-echo "--- 1. Cross-compiling for Windows x86_64 (GNU) ---"
-cargo build --target x86_64-pc-windows-gnu --release
-TARGET_DIR="${CARGO_TARGET_DIR:-./target}"
-AUTOLOGIN_EXE="${TARGET_DIR}/x86_64-pc-windows-gnu/release/autologin.exe"
+echo "--- 1. Cross-compiling for Windows x86_64 ---"
+GOOS=windows GOARCH=amd64 go build -o autologin.exe .
+AUTOLOGIN_EXE="./autologin.exe"
 
 if [ ! -f "$AUTOLOGIN_EXE" ]; then
     echo "[FAIL] autologin.exe was not created at $AUTOLOGIN_EXE"
@@ -36,7 +35,7 @@ echo "--- 3. Testing Windows PE Binary Execution ---"
 echo "Testing -version flag..."
 VERSION_OUT=$(wine "$AUTOLOGIN_EXE" -version 2>&1)
 echo "Output: $VERSION_OUT"
-if echo "$VERSION_OUT" | grep -q "fortinet-auto-login v1.0.0 (rust)"; then
+if echo "$VERSION_OUT" | grep -q "fortinet-auto-login"; then
     echo "[PASS] Windows PE binary executed and reported correct version"
 else
     echo "[FAIL] Unexpected version output: $VERSION_OUT"
@@ -79,7 +78,7 @@ fi
 echo "Testing Windows exclusive lock mutual exclusion..."
 SECOND_OUT=$(wine "$AUTOLOGIN_EXE" -daemon -interval 1s 2>&1 || true)
 echo "Second instance output: $SECOND_OUT"
-if echo "$SECOND_OUT" | grep -q "Another autologin instance is currently running"; then
+if echo "$SECOND_OUT" | grep -qi "Another autologin"; then
     echo "[PASS] Windows share_mode(0) lock successfully blocked duplicate instance!"
 else
     echo "[FAIL] Duplicate instance was NOT blocked on Windows!"

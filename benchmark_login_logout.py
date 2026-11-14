@@ -22,9 +22,9 @@ def run_cmd(cmd):
     return p.returncode, p.stdout.strip(), elapsed
 
 def check_internet():
-    # Use curl directly
-    rc, out, _ = run_cmd(["curl", "-s", "--max-time", "3", "http://detectportal.firefox.com/success.txt"])
-    return rc == 0 and "success" in out
+    # Use curl with Cloudflare generate_204
+    rc, out, _ = run_cmd(["curl", "-s", "--max-time", "3", "-o", "/dev/null", "-w", "%{http_code}", "http://cp.cloudflare.com/generate_204"])
+    return rc == 0 and "204" in out
 
 def emergency_restore():
     print("\n[SAFETY] Ensuring internet is connected before terminating...")

@@ -76,7 +76,7 @@ graph TD
 
 | Test Case | Scope | Description |
 | :--- | :--- | :--- |
-| `test_config_defaults` | Configuration | Confirms default gateway (`192.168.55.253:1003`), ports (`[1003, 1000]`), and all 5 fallback URLs. |
+| `test_config_defaults` | Configuration | Confirms default gateway (`192.168.55.253:1003`), port (`1003`), and Cloudflare generate_204 endpoint. |
 | `test_config_serialization_and_save` | Storage | Verifies JSON serialization and round-trip read/write from custom path. |
 | `test_config_env_overrides` | Env Vars | Verifies `FORTINET_PORTAL_HOST` and `FORTINET_CHECK_URL` overrides take precedence. |
 | `test_network_probe_failover_when_primary_fails` | Resilience | Mocks a failure on primary probe (Mozilla) and confirms seamless failover to secondary probe (Google). |

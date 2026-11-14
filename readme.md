@@ -1,6 +1,6 @@
-# fortinet-auto-login (Rust Edition)
+# fortinet-auto-login
 
-A lightning-fast, highly optimized CLI and background daemon written in Rust that automates login, logout, network detection, keepalive, and Cloudflare WARP circumvention for Fortinet FortiGate captive portals.
+A lightning-fast, highly optimized CLI and background daemon written in Go that automates login, logout, network detection, keepalive, and Cloudflare WARP circumvention for Fortinet FortiGate captive portals.
 
 ---
 

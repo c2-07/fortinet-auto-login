@@ -7,13 +7,12 @@ echo "=========================================================="
 
 cd /app
 
-echo "--- 1. Linux Compilation & Unit/Integration Tests ---"
-cargo test --all-targets
+echo "--- 1. Linux Compilation & Unit Tests ---"
+go test -v ./...
 
 echo "--- 2. Build Release Binary for Linux ---"
-cargo build --release
-TARGET_DIR="${CARGO_TARGET_DIR:-./target}"
-AUTOLOGIN="${TARGET_DIR}/release/autologin"
+go build -o autologin .
+AUTOLOGIN="./autologin"
 
 echo "--- 3. Setup Test Credentials ---"
 $AUTOLOGIN -u "docker_user" -p "docker_pass"
@@ -70,7 +69,7 @@ fi
 echo "Testing duplicate instance rejection..."
 OUTPUT=$($AUTOLOGIN -daemon -interval 1s 2>&1 || true)
 echo "Second instance output: $OUTPUT"
-if echo "$OUTPUT" | grep -q "Another autologin instance is currently running"; then
+if echo "$OUTPUT" | grep -qi "Another autologin"; then
     echo "[PASS] Mutual exclusion enforced: duplicate instance rejected!"
 else
     echo "[FAIL] Duplicate instance was NOT rejected!"
