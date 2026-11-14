@@ -29,15 +29,16 @@ pub struct ProcessLock {
 impl ProcessLock {
     pub fn try_acquire(name: &str) -> Result<Self, AppError> {
         let lock_path = get_lock_dir().join(format!("{}.lock", name));
-        let file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(&lock_path)?;
 
         #[cfg(unix)]
-        {
+        let file = {
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .open(&lock_path)?;
+
             use std::os::unix::io::AsRawFd;
             let fd = file.as_raw_fd();
             let ret = unsafe { flock(fd, LOCK_EX | LOCK_NB) };
@@ -47,7 +48,33 @@ impl ProcessLock {
                     lock_path.display()
                 )));
             }
-        }
+            file
+        };
+
+        #[cfg(windows)]
+        let file = {
+            use std::os::windows::fs::OpenOptionsExt;
+            OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create(true)
+                .share_mode(0) // Exclusive lock: sharing denied
+                .open(&lock_path)
+                .map_err(|_| {
+                    AppError::LockAcquisitionFailed(format!(
+                        "Another autologin instance is currently running ({})",
+                        lock_path.display()
+                    ))
+                })?
+        };
+
+        #[cfg(not(any(unix, windows)))]
+        let file = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&lock_path)?;
 
         Ok(Self {
             _file: file,

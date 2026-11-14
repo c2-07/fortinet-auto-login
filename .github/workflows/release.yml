@@ -10,24 +10,35 @@ permissions:
 
 jobs:
   build:
-    name: Build - ${{ matrix.target }}
+    name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
+          # Linux
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
             artifact_name: fortinet-auto-login-linux-amd64
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: fortinet-auto-login-linux-arm64
+
+          # macOS
           - target: aarch64-apple-darwin
             os: macos-latest
             artifact_name: fortinet-auto-login-darwin-arm64
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-latest
             artifact_name: fortinet-auto-login-darwin-amd64
+
+          # Windows
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             artifact_name: fortinet-auto-login-windows-amd64.exe
+          - target: aarch64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: fortinet-auto-login-windows-arm64.exe
 
     steps:
       - name: Checkout repository
@@ -38,6 +49,14 @@ jobs:
         with:
           targets: ${{ matrix.target }}
 
+      - name: Install Linux ARM64 cross-compilation toolchain
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+          echo "CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+          echo "CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc" >> $GITHUB_ENV
+
       - name: Build release binary
         run: cargo build --release --target ${{ matrix.target }}
 
@@ -45,7 +64,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+          if [[ "${{ matrix.target }}" == *"windows"* ]]; then
             cp "target/${{ matrix.target }}/release/autologin.exe" "dist/${{ matrix.artifact_name }}"
           else
             cp "target/${{ matrix.target }}/release/autologin" "dist/${{ matrix.artifact_name }}"
@@ -72,8 +91,11 @@ jobs:
           path: dist
           merge-multiple: true
 
-      - name: Inspect artifacts
-        run: ls -la dist/
+      - name: Generate SHA256 Checksums
+        run: |
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          ls -la
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2

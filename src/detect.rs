@@ -79,6 +79,19 @@ fn resolve_gateway_from_system() -> Option<String> {
         }
     }
 
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("route").args(["print", "0.0.0.0"]).output() {
+            let text = String::from_utf8_lossy(&output.stdout);
+            for line in text.lines() {
+                let parts: Vec<&str> = line.split_whitespace().collect();
+                if parts.len() >= 3 && parts[0] == "0.0.0.0" && parts[1] == "0.0.0.0" {
+                    return Some(parts[2].to_string());
+                }
+            }
+        }
+    }
+
     None
 }
 
