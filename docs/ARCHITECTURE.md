@@ -10,25 +10,25 @@ The application is structured into decoupled modules, separating CLI input handl
 
 ```mermaid
 graph TD
-    User([User / Shell / OS Scheduler]) --> CLI[CLI Entrypoint & Command Dispatcher: main.rs]
+    User([User / Shell / OS Scheduler]) --> CLI[CLI Entrypoint & Command Dispatcher: main.go]
     
     subgraph Core Subsystems
-        CLI --> Config[Configuration Engine: config.rs]
-        CLI --> Lock[Process Locking & IPC: lock.rs]
-        CLI --> Detect[Network Detection & Probes: detect.rs]
-        CLI --> Net[Network Client & Failover: network.rs]
-        CLI --> Auth[Fortinet Protocol Engine: auth.rs]
-        CLI --> Daemon[Daemon & Background Service: daemon.rs]
-        CLI --> Warp[Cloudflare WARP Engine: warp.rs]
+        CLI --> Config[Configuration Engine: config.go]
+        CLI --> Lock[Process Locking & IPC: lock.go / lock_unix.go / lock_windows.go]
+        CLI --> Detect[Network Detection & Probes: detect.go]
+        CLI --> Net[Network Client & Failover: network.go]
+        CLI --> Session[Session & Credentials: session.go / credentials.go]
+        CLI --> Daemon[Daemon & Background Service: daemon.go / platform.go]
+        CLI --> Warp[Cloudflare WARP Engine: warp.go]
     end
 
     subgraph External Interfaces
         Config -.-> ConfigFile[(~/.fortinet-autologin/config.json)]
         Lock -.-> LockFile[(/tmp/*.lock or %TEMP%/*.lock)]
-        Auth -.-> CredStore[(~/.fortinet-autologin/credentials.json)]
-        Auth -.-> SessionStore[(~/.fortinet-autologin/session.json)]
-        Net --> Probes{{Primary & Fallback Web Endpoints}}
-        Auth --> FortiGate{{Fortinet FortiGate Gateway}}
+        Session -.-> CredStore[(~/.fortinet-autologin/credentials.json)]
+        Session -.-> SessionStore[(~/.fortinet-autologin/session.json)]
+        Net --> Probes{{Cloudflare 204 & Direct Gateway IP:1000}}
+        Net --> FortiGate{{Fortinet FortiGate Gateway :1003}}
         Warp --> WarpCLI{{Cloudflare WARP CLI / Daemon}}
     end
 ```
@@ -39,16 +39,17 @@ graph TD
 
 | Source File | Responsibility |
 | :--- | :--- |
-| `src/main.rs` | CLI argument parsing, sub-command routing, colored terminal logging, interactive prompts, top-level error reporting. |
-| `src/config.rs` | Configuration schema (`AppConfig`), persistent JSON storage (`config.json`), environment variable overrides, factory defaults. |
-| `src/detect.rs` | Network environment inspection, Fortinet gateway detection, DNS/DHCP inspection, Wi-Fi SSID discovery. |
-| `src/network.rs` | HTTP probe engine, primary and fallback check URL failover, TLS configuration, captive portal redirect extraction. |
-| `src/auth.rs` | FortiGate `fgtauth` protocol client, session state persistence, magic token lifecycle, login/logout handshakes, keepalive countdown. |
-| `src/lock.rs` | Cross-platform advisory file locking (`flock` on Unix, exclusive file sharing on Windows), preventing race conditions between CLI and daemon. |
-| `src/daemon.rs` | Foreground polling daemon loop, event-driven network trigger integration, OS service installation (`launchd`, `systemd`, `schtasks`). |
-| `src/warp.rs` | Cloudflare WARP Anycast IP and port matrix generator, UDP blackhole reachability testing, automated interface reset. |
-| `src/updater.rs` | Self-updater, GitHub Releases tag query, binary asset download, atomic binary replacement. |
-| `src/lib.rs` | Shared library exports, crate-level utilities, and unit testing harness. |
+| `src/main.go` | CLI argument parsing, sub-command routing, colored terminal logging, interactive prompts, top-level error reporting. |
+| `src/config.go` | Configuration schema (`appConfig`), persistent JSON storage (`config.json`), CLI `-config` overrides, factory defaults. |
+| `src/detect.go` | Network environment inspection, Fortinet gateway detection, DNS/DHCP inspection, Wi-Fi SSID discovery. |
+| `src/network.go` | HTTP probe engine, direct gateway IP fallback (`:1000`), fast retry backoff, TLS configuration, captive portal redirect extraction, `/fgtauth` login & `/logout`. |
+| `src/session.go` | Session state persistence (`session.json`), magic token lifecycle, keepalive countdown parsing, session clearing. |
+| `src/credentials.go` | Secure credential storage (`credentials.json`), terminal prompt fallback, `-clear-creds` wiping. |
+| `src/lock.go` | Cross-platform advisory file locking (`flock` on Unix, exclusive file sharing on Windows), preventing race conditions. |
+| `src/daemon.go` | Foreground polling daemon loop with context-aware cancellation (`SIGINT`/`SIGTERM`). |
+| `src/platform.go` | OS service management (`launchd` on macOS, `systemd` on Linux, Task Scheduler on Windows), `-uninstall` engine. |
+| `src/warp.go` | Cloudflare WARP Anycast IP and port matrix generator, UDP reachability testing, automated interface reset. |
+| `src/upgrade.go` | Self-updater, GitHub Releases tag query, binary asset download, atomic binary replacement. |
 
 ---
 

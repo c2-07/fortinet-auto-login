@@ -5,11 +5,12 @@
 **Fortinet Auto-Login** (`autologin`) is a self-contained, high-performance binary engineered to automate authentication, session keepalive, unexpected logout recovery, and VPN circumvention on enterprise networks protected by Fortinet FortiGate firewalls.
 
 ### Key Metrics
-- **Language**: Rust (Edition 2021)
-- **Binary Footprint**: ~3.4 MB (stripped release binary)
-- **Startup Latency**: < 10 ms
-- **Memory Footprint (RSS)**: < 8 MB
-- **Dependencies**: Minimal, zero native C runtime requirements (`serde`, `serde_json`, `regex`, `ureq`).
+- **Language**: Go (Standard Library `net/http`, `crypto/tls`, pure Go)
+- **Binary Footprint**: ~6.8 MB (stripped release binary, zero external C dependencies)
+- **Startup Latency**: < 5 ms
+- **Discovery Latency**: < 20 ms (direct gateway IP fallback on port 1000)
+- **Memory Footprint (RSS)**: < 10 MB
+- **Dependencies**: Minimal standard library with pure Go multi-platform release builds.
 
 ---
 
@@ -17,14 +18,14 @@
 
 The application is compiled and tested across 6 production targets:
 
-| OS | Architecture | Rust Target Triple | Release Artifact Name |
+| OS | Architecture | Go GOOS / GOARCH | Release Artifact Name |
 | :--- | :--- | :--- | :--- |
-| **macOS** | ARM64 (Apple Silicon) | `aarch64-apple-darwin` | `fortinet-auto-login-darwin-arm64` |
-| **macOS** | x86_64 (Intel) | `x86_64-apple-darwin` | `fortinet-auto-login-darwin-amd64` |
-| **Linux** | x86_64 (Intel/AMD) | `x86_64-unknown-linux-gnu` | `fortinet-auto-login-linux-amd64` |
-| **Linux** | ARM64 | `aarch64-unknown-linux-gnu` | `fortinet-auto-login-linux-arm64` |
-| **Windows** | x86_64 | `x86_64-pc-windows-msvc` / `gnu` | `fortinet-auto-login-windows-amd64.exe` |
-| **Windows** | ARM64 | `aarch64-pc-windows-msvc` | `fortinet-auto-login-windows-arm64.exe` |
+| **macOS** | ARM64 (Apple Silicon) | `darwin` / `arm64` | `fortinet-auto-login-darwin-arm64` |
+| **macOS** | x86_64 (Intel) | `darwin` / `amd64` | `fortinet-auto-login-darwin-amd64` |
+| **Linux** | x86_64 (Intel/AMD) | `linux` / `amd64` | `fortinet-auto-login-linux-amd64` |
+| **Linux** | ARM64 | `linux` / `arm64` | `fortinet-auto-login-linux-arm64` |
+| **Windows** | x86_64 | `windows` / `amd64` | `fortinet-auto-login-windows-amd64.exe` |
+| **Windows** | ARM64 | `windows` / `arm64` | `fortinet-auto-login-windows-arm64.exe` |
 
 ---
 

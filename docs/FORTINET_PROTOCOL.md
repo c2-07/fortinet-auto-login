@@ -19,6 +19,21 @@ Connection: close
 Content-Length: 0
 ```
 
+### 1.1 DNS Blackholing & Direct Gateway IP Fallback (Port 1000)
+
+When an endpoint is in an unauthenticated or logged-out state:
+- Many FortiGate installations drop all outbound UDP/TCP port 53 packets directed to external public resolvers (e.g. `1.1.1.1`, `8.8.8.8`).
+- Probing domain names (such as `http://cp.cloudflare.com/generate_204`) can cause the host OS resolver to hang for 5 to 10 seconds waiting for a response that will never arrive.
+- **Direct Gateway IP Fallback**: To guarantee sub-second discovery, `autologin` implements a direct gateway fallback. If the external probe times out or encounters a DNS error, it queries the gateway IP directly on FortiOS HTTP captive portal redirect port `1000`:
+  ```http
+  GET / HTTP/1.1
+  Host: 192.168.55.253:1000
+  ```
+  Because the target is an IP literal on the local broadcast subnet, **zero DNS lookups occur**. FortiGate returns the captive portal URL with a fresh `magic` challenge in `< 20ms`:
+  ```html
+  <script>window.location="https://192.168.55.253:1003/fgtauth?049b7817e292e741"</script>
+  ```
+
 ---
 
 ## 2. Protocol Anatomy & Parameters
@@ -169,7 +184,8 @@ To terminate an active session cleanly without leaving lingering state on the fi
 
 - **Endpoint**: `GET https://<portal_host>/logout?<magic>`
 - **Processing**:
-  1. The client loads the active `session.json`.
-  2. Submits the logout request with the active `magic` token.
+  1. The client loads the active `session.json` (or uses a randomized magic fallback if no active session is cached).
+  2. Submits the logout request with the active `magic` token (maximum 2 retries, 4s timeout).
   3. FortiGate invalidates the session and deletes the NAT mapping for the client IP.
-  4. Local `session.json` cache is purged.
+  4. Local `session.json` cache is immediately purged via `clearSession()`.
+  5. The memory detection cache is reset via `InvalidateDetectionCache()`, ensuring subsequent CLI and daemon calls immediately recognize the logged-out state.
