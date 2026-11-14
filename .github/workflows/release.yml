@@ -3,50 +3,81 @@ name: Release
 on:
   push:
     tags:
-      - 'v*' # Trigger on any tag starting with 'v' e.g. v1.0.0
+      - 'v*'
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    runs-on: ubuntu-latest
+  build:
+    name: Build - ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            artifact_name: fortinet-auto-login-linux-amd64
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            artifact_name: fortinet-auto-login-darwin-arm64
+          - target: x86_64-apple-darwin
+            os: macos-13
+            artifact_name: fortinet-auto-login-darwin-amd64
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            artifact_name: fortinet-auto-login-windows-amd64.exe
+
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
         with:
-          go-version: '1.21' # Adjust version if needed, 1.21+ recommended
+          targets: ${{ matrix.target }}
 
-      - name: Get version info
-        id: vars
-        run: |
-          echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_ENV
-          echo "COMMIT=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
-          echo "DATE=$(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> $GITHUB_ENV
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
 
-      - name: Build binaries
+      - name: Prepare binary artifact
+        shell: bash
         run: |
           mkdir -p dist
-          LDFLAGS="-s -w -X main.version=${{ env.VERSION }} -X main.commit=${{ env.COMMIT }} -X main.date=${{ env.DATE }}"
-          
-          # Linux
-          GOOS=linux GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/fortinet-auto-login-linux-amd64 .
-          GOOS=linux GOARCH=arm64 go build -ldflags="$LDFLAGS" -o dist/fortinet-auto-login-linux-arm64 .
-          
-          # macOS
-          GOOS=darwin GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/fortinet-auto-login-darwin-amd64 .
-          GOOS=darwin GOARCH=arm64 go build -ldflags="$LDFLAGS" -o dist/fortinet-auto-login-darwin-arm64 .
-          
-          # Windows
-          GOOS=windows GOARCH=amd64 go build -ldflags="$LDFLAGS" -o dist/fortinet-auto-login-windows-amd64.exe .
-          GOOS=windows GOARCH=arm64 go build -ldflags="$LDFLAGS" -o dist/fortinet-auto-login-windows-arm64.exe .
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            cp "target/${{ matrix.target }}/release/autologin.exe" "dist/${{ matrix.artifact_name }}"
+          else
+            cp "target/${{ matrix.target }}/release/autologin" "dist/${{ matrix.artifact_name }}"
+            chmod +x "dist/${{ matrix.artifact_name }}"
+          fi
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v1
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact_name }}
+          path: dist/${{ matrix.artifact_name }}
+
+  release:
+    name: Publish Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Inspect artifacts
+        run: ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
           files: dist/*
-          name: Release ${{ env.VERSION }}
+          name: Release ${{ github.ref_name }}
           generate_release_notes: true
