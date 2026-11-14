@@ -48,6 +48,7 @@ fn print_custom_usage() {
         "  autologin -host <host:port>  Temporarily override campus gateway host for this run"
     );
     println!("  autologin -upgrade           Check for and install the latest release from GitHub");
+    println!("  autologin -uninstall         Completely uninstall autologin and remove all data");
     println!("  autologin -version           Print version information\n");
 }
 
@@ -110,6 +111,7 @@ fn main() {
     let mut warp_flag = false;
     let mut warp_disconnect_flag = false;
     let mut upgrade_flag = false;
+    let mut uninstall_flag = false;
     let mut version_flag = false;
     let mut auto_flag = false;
 
@@ -168,7 +170,7 @@ fn main() {
                 service_cmd = "install".to_string();
             }
             "-uninstall" | "--uninstall" => {
-                service_cmd = "uninstall".to_string();
+                uninstall_flag = true;
             }
             "-daemon" | "-d" | "--daemon" | "-keepalive" | "-k" | "--keepalive" => {
                 daemon_flag = true;
@@ -271,6 +273,12 @@ fn main() {
         if !check_upgrade() {
             process::exit(1);
         }
+        return;
+    }
+
+    // 2b. Full Uninstall
+    if uninstall_flag {
+        fortinet_lib::platform::full_uninstall();
         return;
     }
 

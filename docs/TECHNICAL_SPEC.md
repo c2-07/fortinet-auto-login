@@ -61,6 +61,7 @@ Configuration & Campus Settings:
   autologin -config reset      Reset configuration to factory defaults
   autologin -host <host:port>  Temporarily override campus gateway host for this run
   autologin -upgrade           Check for and install the latest release from GitHub
+  autologin -uninstall         Completely uninstall autologin and remove all data
   autologin -version           Print version information
 ```
 

@@ -388,3 +388,113 @@ pub fn clear_logs() {
         println!("\x1b[31m[FAIL]\x1b[0m   Failed to clear log file");
     }
 }
+
+#[cfg(not(target_os = "windows"))]
+fn clean_shell_path_unix() {
+    if let Ok(home) = env::var("HOME") {
+        let home_path = PathBuf::from(home);
+        let rc_files = [
+            home_path.join(".zshrc"),
+            home_path.join(".bashrc"),
+            home_path.join(".bash_profile"),
+            home_path.join(".profile"),
+        ];
+
+        for rc in &rc_files {
+            if let Ok(content) = std::fs::read_to_string(rc) {
+                if content.contains("fortinet-auto-login") {
+                    let filtered: Vec<&str> = content
+                        .lines()
+                        .filter(|l| {
+                            !l.contains("fortinet-auto-login")
+                                && !l.contains("# Added by fortinet-auto-login installer")
+                        })
+                        .collect();
+                    let new_content = filtered.join("\n") + "\n";
+                    let _ = std::fs::write(rc, new_content);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn clean_powershell_path_windows() {
+    let script = r#"
+        $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+        if ($userPath) {
+            $filtered = ($userPath -split ';' | Where-Object { $_ -and $_ -notlike '*fortinet-auto-login*' -and $_ -notlike '*.fortinet-autologin*' }) -join ';'
+            [Environment]::SetEnvironmentVariable("Path", $filtered, "User")
+        }
+    "#;
+    let _ = Command::new("powershell")
+        .args(["-NoProfile", "-Command", script])
+        .status();
+}
+
+pub fn full_uninstall() {
+    println!("\x1b[33m[UNINSTALL]\x1b[0m Completely uninstalling autologin...");
+
+    // 1. Remove background service
+    uninstall_service();
+
+    // 2. Disconnect WARP if active
+    let _ = Command::new("warp-cli")
+        .arg("disconnect")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+
+    // 3. Remove data directory (~/.fortinet-autologin)
+    let app_dir = crate::credentials::get_app_dir();
+    if app_dir.exists() {
+        if let Err(e) = std::fs::remove_dir_all(&app_dir) {
+            println!("\x1b[33m[WARN]\x1b[0m   Could not remove data dir: {}", e);
+        } else {
+            println!(
+                "\x1b[32m[OK]\x1b[0m     Removed configuration and credentials ({})",
+                app_dir.display()
+            );
+        }
+    }
+
+    // 4. Remove log files
+    let log_path = get_log_path();
+    let _ = std::fs::remove_file(&log_path);
+    let old_log = log_path.with_extension("log.old");
+    let _ = std::fs::remove_file(&old_log);
+    println!("\x1b[32m[OK]\x1b[0m     Removed daemon log files");
+
+    // 5. Clean shell PATH modifications
+    #[cfg(not(target_os = "windows"))]
+    clean_shell_path_unix();
+    #[cfg(target_os = "windows")]
+    clean_powershell_path_windows();
+    println!("\x1b[32m[OK]\x1b[0m     Cleaned shell PATH configuration");
+
+    // 6. Remove the executable itself
+    if let Ok(exe) = env::current_exe() {
+        println!(
+            "\x1b[32m[OK]\x1b[0m     Removing executable binary at {}",
+            exe.display()
+        );
+        #[cfg(unix)]
+        {
+            let _ = std::fs::remove_file(&exe);
+        }
+        #[cfg(target_os = "windows")]
+        {
+            let old = exe.with_extension("old");
+            let _ = std::fs::remove_file(&old);
+            let _ = std::fs::rename(&exe, &old);
+            let cmd = format!(
+                "timeout /t 1 /nobreak > NUL & del /f /q \"{}\" \"{}\"",
+                exe.display(),
+                old.display()
+            );
+            let _ = Command::new("cmd").args(["/c", &cmd]).spawn();
+        }
+    }
+
+    println!("\x1b[32m[OK]\x1b[0m     autologin has been completely uninstalled from this system.");
+}
