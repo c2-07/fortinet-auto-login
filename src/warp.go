@@ -11,6 +11,11 @@ import (
 	"time"
 )
 
+// cmdRunner executes commands for WARP operations, mockable in tests.
+var cmdRunner = func(name string, args ...string) ([]byte, error) {
+	return exec.Command(name, args...).CombinedOutput()
+}
+
 // Comprehensive Cloudflare WARP Anycast IP pools
 var warpAnycastIPs = []string{
 	"162.159.192.1",
@@ -239,6 +244,57 @@ func recoverViaWiFiCycle() bool {
 	return false
 }
 
+// isConnectivityCheckDisabled inspects warp-cli settings output to determine
+// whether internal connectivity checks are currently disabled.
+func isConnectivityCheckDisabled(output string) (disabled bool, found bool) {
+	for _, line := range strings.Split(output, "\n") {
+		lower := strings.ToLower(strings.TrimSpace(line))
+		if strings.Contains(lower, "connectivity check") || strings.Contains(lower, "connectivity_check") || strings.Contains(lower, "connectivity-check") {
+			// Explicit disabled settings
+			if strings.Contains(lower, "disabled: true") || strings.Contains(lower, "disabled:true") ||
+				strings.Contains(lower, "disabled: \"true\"") || strings.Contains(lower, ": disabled") {
+				return true, true
+			}
+			// Explicit enabled settings
+			if strings.Contains(lower, "disabled: false") || strings.Contains(lower, "disabled:false") ||
+				strings.Contains(lower, "disabled: \"false\"") || strings.Contains(lower, ": enabled") {
+				return false, true
+			}
+			// General fallback keywords
+			if strings.Contains(lower, "disabled") {
+				return true, true
+			}
+			if strings.Contains(lower, "enabled") {
+				return false, true
+			}
+		}
+	}
+	return false, false
+}
+
+// ensureWarpConnectivityCheckDisabled checks whether warp-cli debug connectivity-check
+// is disabled. If not disabled, it explicitly executes the disable command.
+func ensureWarpConnectivityCheckDisabled() bool {
+	out, err := cmdRunner("warp-cli", "settings", "list")
+	outputStr := string(out)
+
+	if err == nil {
+		if disabled, found := isConnectivityCheckDisabled(outputStr); found && disabled {
+			logf("\033[32m[OK]\033[0m     WARP internal connectivity check is already disabled.")
+			return true
+		}
+	}
+
+	logf("\033[36m[WARP]\033[0m   WARP internal connectivity check is not disabled. Disabling...")
+	disOut, disErr := cmdRunner("warp-cli", "debug", "connectivity-check", "disable")
+	if disErr != nil {
+		logf("\033[33m[WARN]\033[0m   Failed to disable WARP connectivity check: %v (%s)", disErr, strings.TrimSpace(string(disOut)))
+		return false
+	}
+	logf("\033[32m[OK]\033[0m     WARP internal connectivity check disabled successfully.")
+	return true
+}
+
 // FixAndConnectWarp systematically finds a responsive Cloudflare endpoint across Anycast pools:
 // 1. Detects Fortinet captive portal / gateway presence
 // 2. Verifies warp-cli presence and configures WireGuard mode
@@ -280,7 +336,7 @@ func FixAndConnectWarp() bool {
 		return false
 	}
 
-	_ = exec.Command("warp-cli", "debug", "connectivity-check", "disable").Run()
+	ensureWarpConnectivityCheckDisabled()
 	_ = exec.Command("warp-cli", "tunnel", "protocol", "set", "WireGuard").Run()
 
 	// Step 3: Check if already connected and verify live internet
