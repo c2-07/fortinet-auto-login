@@ -174,6 +174,9 @@ func PrintStatus() {
 	} else {
 		fmt.Printf("\nSaved User:     \033[33mNone (Run autologin to set)\033[0m\n")
 	}
+
+	fmt.Printf("\n\033[36m--- Background Service ---\033[0m\n")
+	serviceStatus()
 }
 
 func updateCache(r FortinetDetectionResult) {

@@ -65,6 +65,12 @@ func TestFlags(t *testing.T) {
 			wantStdout: "Usage: autologin",
 			wantExit:   0,
 		},
+		{
+			name:       "service status subcommand",
+			args:       []string{"-service", "status"},
+			wantStdout: "Background service:",
+			wantExit:   0,
+		},
 	}
 
 	for _, tt := range tests {
@@ -323,6 +329,7 @@ func TestServiceMode(t *testing.T) {
 		cmdInstall.Env = append(os.Environ(),
 			"HOME="+fakeHome,
 			"USERPROFILE="+fakeHome,
+			"AUTOLOGIN_SKIP_ELEVATION=1",
 		)
 
 		var stdoutInstall bytes.Buffer
@@ -350,6 +357,7 @@ func TestServiceMode(t *testing.T) {
 		cmdUninstall.Env = append(os.Environ(),
 			"HOME="+fakeHome,
 			"USERPROFILE="+fakeHome,
+			"AUTOLOGIN_SKIP_ELEVATION=1",
 		)
 
 		var stdoutUninstall bytes.Buffer
