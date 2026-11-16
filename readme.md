@@ -2,6 +2,8 @@
 
 A lightning-fast, highly optimized CLI and background daemon written in Go that automates login, logout, network detection, keepalive, and Cloudflare WARP circumvention for Fortinet FortiGate captive portals.
 
+<img width="1323" height="831" alt="image" src="https://github.com/user-attachments/assets/e1bb7594-c88a-4395-a8bb-84fab4012974" />
+
 ---
 
 ## ⚡ 1-Second Install
