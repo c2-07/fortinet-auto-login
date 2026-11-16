@@ -9,6 +9,11 @@ import (
 	"syscall"
 )
 
+const (
+	errSharingViolation syscall.Errno = 32
+	errLockViolation    syscall.Errno = 33
+)
+
 func acquireProcessLock(name string) (*ProcessLock, error) {
 	lockPath := filepath.Join(getLockDir(), fmt.Sprintf("%s.lock", name))
 	pathPtr, err := syscall.UTF16PtrFromString(lockPath)
@@ -25,6 +30,27 @@ func acquireProcessLock(name string) (*ProcessLock, error) {
 		syscall.FILE_ATTRIBUTE_NORMAL,
 		0,
 	)
+	if err != nil {
+		if errno, ok := err.(syscall.Errno); ok && (errno == errSharingViolation || errno == errLockViolation) {
+			return nil, fmt.Errorf("another instance of autologin is already running")
+		}
+		// Fallback to user app directory if temp lock dir fails
+		fallbackDir := filepath.Join(getAppDir(), "locks")
+		_ = os.MkdirAll(fallbackDir, 0700)
+		lockPath = filepath.Join(fallbackDir, fmt.Sprintf("%s.lock", name))
+		pathPtr, err = syscall.UTF16PtrFromString(lockPath)
+		if err == nil {
+			handle, err = syscall.CreateFile(
+				pathPtr,
+				syscall.GENERIC_READ|syscall.GENERIC_WRITE,
+				0,
+				nil,
+				syscall.OPEN_ALWAYS,
+				syscall.FILE_ATTRIBUTE_NORMAL,
+				0,
+			)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("another instance of autologin is already running")
 	}

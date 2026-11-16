@@ -14,6 +14,7 @@ func daemon(ctx context.Context, interval time.Duration) {
 }
 
 func daemonWithTickHandler(ctx context.Context, interval time.Duration, tickFn func(*bool)) {
+	logf("\033[36m[DAEMON]\033[0m Starting background monitoring daemon (interval=%s)", interval)
 	logf("\033[36m[INIT]\033[0m   Daemon started (interval=%s)", interval)
 
 	// Rotate log if it exceeded cap
@@ -46,6 +47,16 @@ func checkDaemonTick(wasFortinet *bool) {
 			}
 			*wasFortinet = true
 		}
+		// If internet is already connected, no authentication is needed
+		if det.InternetConnected {
+			return
+		}
+		authLock, err := acquireProcessLock("auth")
+		if err != nil {
+			// Another process (e.g. manual CLI) is currently authenticating, yield this tick
+			return
+		}
+		defer authLock.Release()
 		login(true, false)
 	} else {
 		if *wasFortinet {
@@ -105,5 +116,10 @@ func runAutoMode() {
 			}
 		}
 	}
+	authLock, err := acquireProcessLock("auth")
+	if err != nil {
+		return
+	}
+	defer authLock.Release()
 	login(true, false)
 }

@@ -7,8 +7,6 @@ import (
 	"io"
 	"os"
 	"os/signal"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"syscall"
 	"time"
@@ -204,6 +202,12 @@ func main() {
 
 	// 3. Cloudflare WARP Circumvention
 	if warpFlag {
+		procLock, err := acquireProcessLock("warp")
+		if err != nil {
+			logf("\033[33m[WARN]\033[0m   Another WARP operation is currently active. Exiting.")
+			os.Exit(1)
+		}
+		defer procLock.Release()
 		if !FixAndConnectWarp() {
 			os.Exit(1)
 		}
@@ -252,6 +256,10 @@ func main() {
 
 	// 8. Logout
 	if logoutFlag {
+		procLock, err := acquireProcessLock("auth")
+		if err == nil {
+			defer procLock.Release()
+		}
 		if !logout() {
 			logf("\033[31m[FAIL]\033[0m   Logout failed")
 		}
@@ -265,20 +273,19 @@ func main() {
 	}
 
 	if daemonFlag {
-		procLock, err := acquireProcessLock("autologin")
+		procLock, err := acquireProcessLock("daemon")
 		if err != nil {
 			logf("\033[33m[WARN]\033[0m   Another autologin process is already active. Exiting.")
 			return
 		}
 		defer procLock.Release()
 
-		if runtime.GOOS == "windows" {
-			logPath := filepath.Join(os.TempDir(), "autologin.log")
-			f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
-			if err == nil {
-				logOut = io.MultiWriter(os.Stdout, f)
-			}
+		logPath := getLogFilePath()
+		f, err := os.OpenFile(logPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err == nil {
+			logOut = io.MultiWriter(os.Stdout, &ansiFilterWriter{w: f})
 		}
+
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		defer stop()
 
@@ -287,15 +294,21 @@ func main() {
 	}
 
 	// 10. Standard Login (Default Action) with Process Lock
-	procLock, err := acquireProcessLock("autologin")
-	if err != nil {
-		logf("\033[33m[WARN]\033[0m   Another autologin process is running. Waiting 1s...")
-		time.Sleep(1 * time.Second)
-		procLock, err = acquireProcessLock("autologin")
-		if err != nil {
-			logf("\033[31m[FAIL]\033[0m   Could not acquire lock: %v", err)
-			return
+	var procLock *ProcessLock
+	var lockErr error
+	for waitAttempt := 0; waitAttempt < 10; waitAttempt++ {
+		procLock, lockErr = acquireProcessLock("auth")
+		if lockErr == nil {
+			break
 		}
+		if waitAttempt == 0 {
+			logf("\033[33m[WARN]\033[0m   Another authentication is in progress. Waiting...")
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	if lockErr != nil {
+		logf("\033[31m[FAIL]\033[0m   Could not acquire lock: %v", lockErr)
+		return
 	}
 	defer procLock.Release()
 

@@ -5,11 +5,28 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"time"
 )
 
-var logOut io.Writer = os.Stdout
+var (
+	logOut io.Writer = os.Stdout
+	ansiRe           = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+)
+
+type ansiFilterWriter struct {
+	w io.Writer
+}
+
+func (a *ansiFilterWriter) Write(p []byte) (n int, err error) {
+	clean := ansiRe.ReplaceAll(p, nil)
+	_, err = a.w.Write(clean)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
 
 const maxLogSize = 2 * 1024 * 1024 // 2 MB size cap before rotation
 

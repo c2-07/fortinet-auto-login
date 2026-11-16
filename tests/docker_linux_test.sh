@@ -77,6 +77,18 @@ else
     exit 1
 fi
 
+# Test manual autologin runs concurrently without being blocked by background daemon
+echo "Testing manual autologin execution while daemon is running..."
+MANUAL_OUT=$($AUTOLOGIN 2>&1 || true)
+echo "Manual autologin output: $MANUAL_OUT"
+if echo "$MANUAL_OUT" | grep -qi "Could not acquire lock"; then
+    echo "[FAIL] Manual autologin was blocked by background daemon lock!"
+    kill -9 $DAEMON_PID || true
+    exit 1
+else
+    echo "[PASS] Manual autologin executed cleanly while daemon was running in background!"
+fi
+
 # Verify log file generated and formatted
 if [ -f "/tmp/autologin.log" ]; then
     echo "[PASS] Log file created at /tmp/autologin.log"

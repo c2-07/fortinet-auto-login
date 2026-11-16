@@ -7,9 +7,11 @@ echo "=========================================================="
 
 cd /app
 
-echo "--- 1. Cross-compiling for Windows x86_64 ---"
-GOOS=windows GOARCH=amd64 go build -o autologin.exe ./src
+echo "--- 1. Checking / Compiling for Windows x86_64 ---"
 AUTOLOGIN_EXE="./autologin.exe"
+if [ ! -f "$AUTOLOGIN_EXE" ]; then
+    GOOS=windows GOARCH=amd64 go build -o autologin.exe ./src
+fi
 
 if [ ! -f "$AUTOLOGIN_EXE" ]; then
     echo "[FAIL] autologin.exe was not created at $AUTOLOGIN_EXE"
@@ -60,7 +62,7 @@ echo "--- 4. Testing Windows Daemon Execution & ProcessLock in Wine ---"
 wine "$AUTOLOGIN_EXE" -u "win_user" -p "win_pass" 2>&1 || true
 
 # Start Windows daemon in background
-wine "$AUTOLOGIN_EXE" -daemon -interval 1s &
+wine "$AUTOLOGIN_EXE" -daemon -interval 1s </dev/null >/tmp/daemon_win.log 2>&1 &
 WINE_PID=$!
 echo "Windows daemon running under Wine with PID: $WINE_PID"
 
@@ -71,12 +73,14 @@ if ps -ef | grep -v grep | grep -q "autologin.exe"; then
     echo "[PASS] Windows daemon process is running under Wine"
 else
     echo "[FAIL] Windows daemon process died unexpectedly"
+    cat /tmp/daemon_win.log || true
     exit 1
 fi
 
 # Test Windows ProcessLock mutual exclusion (share_mode(0))
 echo "Testing Windows exclusive lock mutual exclusion..."
-SECOND_OUT=$(wine "$AUTOLOGIN_EXE" -daemon -interval 1s 2>&1 || true)
+wine "$AUTOLOGIN_EXE" -daemon -interval 1s > /tmp/second.out 2>&1 || true
+SECOND_OUT=$(cat /tmp/second.out)
 echo "Second instance output: $SECOND_OUT"
 if echo "$SECOND_OUT" | grep -qi "Another autologin"; then
     echo "[PASS] Windows share_mode(0) lock successfully blocked duplicate instance!"
@@ -84,6 +88,19 @@ else
     echo "[FAIL] Duplicate instance was NOT blocked on Windows!"
     kill -9 $WINE_PID || true
     exit 1
+fi
+
+# Test Windows manual autologin while daemon is running
+echo "Testing manual autologin execution while daemon is running on Windows..."
+wine "$AUTOLOGIN_EXE" > /tmp/manual_win.out 2>&1 || true
+MANUAL_WIN=$(cat /tmp/manual_win.out)
+echo "Manual autologin output: $MANUAL_WIN"
+if echo "$MANUAL_WIN" | grep -qi "Could not acquire lock"; then
+    echo "[FAIL] Manual autologin was blocked by daemon lock on Windows!"
+    kill -9 $WINE_PID || true
+    exit 1
+else
+    echo "[PASS] Manual autologin executed cleanly while daemon was running in background on Windows!"
 fi
 
 # Verify Windows log file in %TEMP%\autologin.log
