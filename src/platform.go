@@ -135,7 +135,24 @@ func uninstallAgent() {
 	}
 }
 
+func serviceStatus() {
+	if runtime.GOOS == "darwin" {
+		serviceStatusDarwin()
+	} else if runtime.GOOS == "linux" {
+		serviceStatusLinux()
+	} else if runtime.GOOS == "windows" {
+		serviceStatusWindows()
+	} else {
+		fmt.Println("\033[31m[FAIL]\033[0m   Service status is not supported on this OS")
+	}
+}
+
 func installWindows(exe string) {
+	// schtasks needs admin
+	if ensureAdmin("install") {
+		return
+	}
+
 	taskName := "FortinetAutoLogin"
 	trArg := fmt.Sprintf("\"%s\" -daemon", exe)
 
@@ -160,6 +177,11 @@ func installWindows(exe string) {
 }
 
 func uninstallWindows() {
+	// schtasks needs admin
+	if ensureAdmin("uninstall") {
+		return
+	}
+
 	taskName := "FortinetAutoLogin"
 
 	_ = exec.Command("schtasks", "/end", "/tn", taskName).Run()
@@ -170,6 +192,59 @@ func uninstallWindows() {
 	}
 
 	fmt.Println("\033[32m[OK]\033[0m     Windows background service uninstalled successfully")
+}
+
+func serviceStatusWindows() {
+	taskName := "FortinetAutoLogin"
+	out, err := exec.Command("schtasks", "/query", "/tn", taskName, "/fo", "csv", "/nh").Output()
+	if err != nil {
+		fmt.Println("\033[33m[INFO]\033[0m   Background service: Not installed")
+		fmt.Println("\033[36m[TIP]\033[0m    Run: autologin -service install")
+		return
+	}
+
+	parts := strings.Split(strings.TrimSpace(string(out)), ",")
+	status := "Installed"
+	if len(parts) >= 3 {
+		status = strings.Trim(parts[2], "\" \r\n")
+	}
+
+	fmt.Printf("\033[32m[OK]\033[0m     Background service: Installed (State: %s)\n", status)
+	fmt.Println("\033[36m[INFO]\033[0m   Task: FortinetAutoLogin (Trigger: onlogon)")
+}
+
+func serviceStatusDarwin() {
+	plistPath := filepath.Join(os.Getenv("HOME"), "Library", "LaunchAgents", "com.fortinet.autologin.plist")
+	if _, err := os.Stat(plistPath); os.IsNotExist(err) {
+		fmt.Println("\033[33m[INFO]\033[0m   Background service: Not installed")
+		fmt.Println("\033[36m[TIP]\033[0m    Run: autologin -service install")
+		return
+	}
+
+	out, _ := exec.Command("launchctl", "list").Output()
+	if strings.Contains(string(out), "com.fortinet.autologin") {
+		fmt.Println("\033[32m[OK]\033[0m     Background service: Installed and loaded (launchd)")
+	} else {
+		fmt.Println("\033[33m[WARN]\033[0m   Background service: Installed but not loaded in launchctl")
+	}
+}
+
+func serviceStatusLinux() {
+	home, _ := os.UserHomeDir()
+	servicePath := filepath.Join(home, ".config", "systemd", "user", "fortinet-autologin.service")
+	if _, err := os.Stat(servicePath); os.IsNotExist(err) {
+		fmt.Println("\033[33m[INFO]\033[0m   Background service: Not installed")
+		fmt.Println("\033[36m[TIP]\033[0m    Run: autologin -service install")
+		return
+	}
+
+	out, _ := exec.Command("systemctl", "--user", "is-active", "fortinet-autologin.service").Output()
+	state := strings.TrimSpace(string(out))
+	if state == "active" {
+		fmt.Println("\033[32m[OK]\033[0m     Background service: Installed and active (systemd)")
+	} else {
+		fmt.Printf("\033[33m[WARN]\033[0m   Background service: Installed (State: %s)\n", state)
+	}
 }
 
 func installDarwin(exe string) {

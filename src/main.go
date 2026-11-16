@@ -30,6 +30,7 @@ func printCustomUsage() {
 	fmt.Println("\nBackground Service & Daemon:")
 	fmt.Println("  autologin -service install   Install event-driven background service (macOS / Linux / Windows)")
 	fmt.Println("  autologin -service uninstall Remove background service")
+	fmt.Println("  autologin -service status    Inspect background service state")
 	fmt.Println("  autologin -daemon [-i 45s]   Run continuous polling daemon in foreground")
 	fmt.Println("\nCloudflare WARP Circumvention:")
 	fmt.Println("  autologin -warp              Intelligently rotate Anycast IPs & ports to connect Cloudflare WARP")
@@ -63,6 +64,9 @@ func main() {
 		case "service-uninstall", "-service-uninstall", "--service-uninstall":
 			uninstallAgent()
 			return
+		case "service-status", "-service-status", "--service-status":
+			serviceStatus()
+			return
 		case "service", "-service", "--service":
 			if len(os.Args) > 2 {
 				sub := strings.ToLower(os.Args[2])
@@ -72,6 +76,10 @@ func main() {
 				}
 				if sub == "uninstall" || sub == "remove" {
 					uninstallAgent()
+					return
+				}
+				if sub == "status" {
+					serviceStatus()
 					return
 				}
 			}
@@ -124,7 +132,7 @@ func main() {
 
 	// Service & Daemon
 	var serviceFlag string
-	flag.StringVar(&serviceFlag, "service", "", "manage background service: install | uninstall")
+	flag.StringVar(&serviceFlag, "service", "", "manage background service: install | uninstall | status")
 
 	var installFlag, serviceUninstallFlag, fullUninstallFlag bool
 	flag.BoolVar(&installFlag, "install", false, "alias for -service install")
@@ -231,7 +239,11 @@ func main() {
 			uninstallAgent()
 			return
 		}
-		fmt.Printf("\033[31m[FAIL]\033[0m   Unknown service command: %q. Use 'install' or 'uninstall'.\n", serviceFlag)
+		if action == "status" {
+			serviceStatus()
+			return
+		}
+		fmt.Printf("\033[31m[FAIL]\033[0m   Unknown service command: %q. Use 'install', 'uninstall', or 'status'.\n", serviceFlag)
 		os.Exit(1)
 	}
 
