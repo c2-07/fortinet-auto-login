@@ -136,6 +136,12 @@ func uninstallAgent() {
 }
 
 func installWindows(exe string) {
+	// schtasks /create requires administrator privileges on Windows.
+	// If not elevated, re-launch this process with a native UAC prompt.
+	if ensureAdmin("install") {
+		return
+	}
+
 	taskName := "FortinetAutoLogin"
 	trArg := fmt.Sprintf("\"%s\" -daemon", exe)
 
@@ -160,6 +166,11 @@ func installWindows(exe string) {
 }
 
 func uninstallWindows() {
+	// schtasks /delete requires administrator privileges on Windows.
+	if ensureAdmin("uninstall") {
+		return
+	}
+
 	taskName := "FortinetAutoLogin"
 
 	_ = exec.Command("schtasks", "/end", "/tn", taskName).Run()

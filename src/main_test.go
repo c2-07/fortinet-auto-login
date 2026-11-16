@@ -323,6 +323,7 @@ func TestServiceMode(t *testing.T) {
 		cmdInstall.Env = append(os.Environ(),
 			"HOME="+fakeHome,
 			"USERPROFILE="+fakeHome,
+			"AUTOLOGIN_SKIP_ELEVATION=1",
 		)
 
 		var stdoutInstall bytes.Buffer
@@ -350,6 +351,7 @@ func TestServiceMode(t *testing.T) {
 		cmdUninstall.Env = append(os.Environ(),
 			"HOME="+fakeHome,
 			"USERPROFILE="+fakeHome,
+			"AUTOLOGIN_SKIP_ELEVATION=1",
 		)
 
 		var stdoutUninstall bytes.Buffer
