@@ -227,7 +227,7 @@ func recoverViaWiFiCycle() bool {
 		_ = exec.Command("warp-cli", "tunnel", "endpoint", "set", ep).Run()
 		_ = exec.Command("warp-cli", "connect").Run()
 
-		for attempt := 0; attempt < 5; attempt++ {
+		for attempt := 0; attempt < 8; attempt++ {
 			time.Sleep(800 * time.Millisecond)
 			chk, _ := exec.Command("warp-cli", "status").CombinedOutput()
 			if strings.Contains(string(chk), "Connected") {
@@ -372,21 +372,21 @@ func FixAndConnectWarp() bool {
 
 		logf("\033[34m[WARP]\033[0m   Testing endpoint [%d/8]: %s...", i+1, ep)
 		_ = exec.Command("warp-cli", "disconnect").Run()
-		time.Sleep(100 * time.Millisecond)
+		time.Sleep(300 * time.Millisecond)
 
 		_ = exec.Command("warp-cli", "tunnel", "endpoint", "set", ep).Run()
 		_ = exec.Command("warp-cli", "connect").Run()
 
 		connected := false
-		for attempt := 0; attempt < 6; attempt++ {
-			time.Sleep(500 * time.Millisecond)
+		for attempt := 0; attempt < 10; attempt++ {
+			time.Sleep(800 * time.Millisecond)
 			chk, _ := exec.Command("warp-cli", "status").CombinedOutput()
 			chkStr := string(chk)
 
 			if strings.Contains(chkStr, "Connected") {
 				statsOut, _ := exec.Command("warp-cli", "tunnel", "stats").CombinedOutput()
 				statsStr := string(statsOut)
-				if !strings.Contains(statsStr, "Received: 0B") || attempt >= 3 {
+				if !strings.Contains(statsStr, "Received: 0B") || attempt >= 5 {
 					connected = true
 					break
 				}
