@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/binary"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -12,6 +13,7 @@ import (
 	"runtime"
 	"strings"
 	"time"
+	"unicode/utf16"
 )
 
 func xmlEscape(s string) string {
@@ -158,8 +160,11 @@ func serviceStatus() {
 // buildWindowsTaskXML returns a Task Scheduler 1.2 XML definition that avoids
 // schtasks's restrictive defaults (battery stop/disallow and 72-hour kill limit),
 // hides the background window, and restarts on failure.
+// Note: Windows schtasks /create /xml expects UTF-16 encoding in the XML prolog
+// matching a UTF-16LE (with BOM) file; declaring UTF-8 causes schtasks to fail
+// with "(1,40)::ERROR: unable to switch the encoding".
 func buildWindowsTaskXML(exe string) string {
-	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>Fortinet Captive Portal Auto-Login Daemon</Description>
@@ -208,6 +213,19 @@ func buildWindowsTaskXML(exe string) string {
 `, xmlEscape(exe))
 }
 
+// encodeUTF16LEWithBOM encodes a UTF-8 string as UTF-16LE with a leading BOM
+// (0xFF, 0xFE), which is the native encoding expected by Windows schtasks /xml.
+func encodeUTF16LEWithBOM(s string) []byte {
+	u16 := utf16.Encode([]rune(s))
+	buf := make([]byte, 2+len(u16)*2)
+	buf[0] = 0xFF
+	buf[1] = 0xFE
+	for i, v := range u16 {
+		binary.LittleEndian.PutUint16(buf[2+i*2:], v)
+	}
+	return buf
+}
+
 func installWindows(exe string) {
 	// schtasks needs admin
 	if ensureAdmin("install") {
@@ -224,7 +242,7 @@ func installWindows(exe string) {
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := tmpFile.WriteString(buildWindowsTaskXML(exe)); err != nil {
+	if _, err := tmpFile.Write(encodeUTF16LEWithBOM(buildWindowsTaskXML(exe))); err != nil {
 		_ = tmpFile.Close()
 		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to write task XML: %v\n", err)
 		return

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/binary"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -8,6 +9,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf16"
 )
 
 func TestConfigSettingsHonoured(t *testing.T) {
@@ -266,21 +268,38 @@ func TestUninstallConfirmationAndPathCleanup(t *testing.T) {
 }
 
 func TestBuildWindowsTaskXML(t *testing.T) {
-	xmlOut := buildWindowsTaskXML(`C:\Users\A&B\autologin.exe`)
+	xmlOut := buildWindowsTaskXML(`C:\Users\A&B\José\autologin.exe`)
 
 	required := []string{
+		`<?xml version="1.0" encoding="UTF-16"?>`,
 		`<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>`,
 		`<StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>`,
 		`<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>`,
 		`<Hidden>true</Hidden>`,
 		`<RestartOnFailure>`,
-		`<Command>C:\Users\A&amp;B\autologin.exe</Command>`,
+		`<Command>C:\Users\A&amp;B\José\autologin.exe</Command>`,
 		`<Arguments>-daemon</Arguments>`,
 	}
 	for _, needle := range required {
 		if !strings.Contains(xmlOut, needle) {
 			t.Errorf("Windows task XML missing %q:\n%s", needle, xmlOut)
 		}
+	}
+
+	encoded := encodeUTF16LEWithBOM(xmlOut)
+	if len(encoded) < 2 || encoded[0] != 0xFF || encoded[1] != 0xFE {
+		t.Fatalf("expected UTF-16LE BOM (0xFF 0xFE), got %x", encoded[:min(2, len(encoded))])
+	}
+	if (len(encoded)-2)%2 != 0 {
+		t.Fatalf("expected even UTF-16LE payload length, got %d", len(encoded)-2)
+	}
+	u16 := make([]uint16, (len(encoded)-2)/2)
+	for i := range u16 {
+		u16[i] = binary.LittleEndian.Uint16(encoded[2+i*2:])
+	}
+	decoded := string(utf16.Decode(u16))
+	if decoded != xmlOut {
+		t.Errorf("UTF-16LE round-trip mismatch")
 	}
 }
 
