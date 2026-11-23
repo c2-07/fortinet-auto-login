@@ -183,6 +183,52 @@ func getPortal(client *http.Client) (string, bool, error) {
 	return "", false, lastErr
 }
 
+// authState is the outcome of a fast-path login check.
+type authState int
+
+const (
+	authStateUnknown   authState = iota // offline, DNS blocked, or inconclusive
+	authStateLoggedIn                   // internet is reachable (no login needed)
+	authStateLoggedOut                  // captive portal intercepted (portal URL captured)
+)
+
+// fastCheckAuthState performs a single lightweight HTTP GET against the primary
+// check URL (no retries, no gateway TLS handshakes) to determine whether the
+// user is still logged in. When logged in, cp.cloudflare.com/generate_204
+// returns 204 (0-byte body) in ~25-55ms. When logged out, FortiGate intercepts
+// port 80 and returns the portal URL + magic token in a single RTT.
+func fastCheckAuthState(client *http.Client) (authState, string) {
+	cfg := effectiveConfig()
+	if len(cfg.CheckURLs) == 0 {
+		return authStateUnknown, ""
+	}
+
+	req, err := http.NewRequest(http.MethodGet, cfg.CheckURLs[0], nil)
+	if err != nil {
+		return authStateUnknown, ""
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return authStateUnknown, ""
+	}
+	body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if readErr != nil {
+		return authStateUnknown, ""
+	}
+
+	result, portal := classifyCheckResponse(resp.StatusCode, resp.Header.Get("Location"), string(body))
+	switch result {
+	case probeConnected:
+		return authStateLoggedIn, ""
+	case probePortal:
+		return authStateLoggedOut, portal
+	default:
+		return authStateUnknown, ""
+	}
+}
+
 func login(quiet bool, isRetry bool) bool {
 	client := makeClient()
 
@@ -201,6 +247,16 @@ func login(quiet bool, isRetry bool) bool {
 			logf("\033[31m[FAIL]\033[0m   Network unreachable")
 		}
 		return false
+	}
+
+	return loginWithPortal(client, portal, quiet, isRetry)
+}
+
+// loginWithPortal completes the FortiGate login handshake using an already
+// discovered portal URL, avoiding a duplicate connectivity probe round trip.
+func loginWithPortal(client *http.Client, portal string, quiet bool, isRetry bool) bool {
+	if client == nil {
+		client = makeClient()
 	}
 
 	if !quiet {
