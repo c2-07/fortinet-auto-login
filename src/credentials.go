@@ -73,6 +73,55 @@ func clearCredentials() {
 	fmt.Println("\033[36m[INFO]\033[0m   You will be prompted for credentials on your next login.")
 }
 
+func loadExistingSSID() string {
+	var c credentials
+	data, err := os.ReadFile(credentialsFilePath())
+	if err != nil {
+		return ""
+	}
+	if err := json.Unmarshal(data, &c); err != nil {
+		return ""
+	}
+	return c.SSID
+}
+
+func parseSSIDList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+	var out []string
+	for _, part := range strings.Split(raw, ",") {
+		if s := strings.TrimSpace(part); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func ssidMatches(allowedRaw, current string) bool {
+	allowed := parseSSIDList(allowedRaw)
+	if len(allowed) == 0 {
+		return true
+	}
+	cur := strings.TrimSpace(current)
+	for _, s := range allowed {
+		if strings.EqualFold(cur, s) {
+			return true
+		}
+	}
+	return false
+}
+
+func setAllowedSSIDs(raw string) error {
+	var c credentials
+	if data, err := os.ReadFile(credentialsFilePath()); err == nil {
+		_ = json.Unmarshal(data, &c)
+	}
+	normalized := strings.Join(parseSSIDList(raw), ", ")
+	c.SSID = normalized
+	return saveCredentials(c)
+}
+
 func promptCredentials() credentials {
 	reader := bufio.NewReader(os.Stdin)
 
@@ -88,10 +137,14 @@ func promptCredentials() credentials {
 		os.Exit(1)
 	}
 	fmt.Println()
-	pass := strings.TrimSpace(string(passBytes))
+	pass := strings.TrimRight(string(passBytes), "\r\n")
 
-	c := credentials{Username: user, Password: pass}
-	saveCredentials(c)
+	c := credentials{
+		Username: user,
+		Password: pass,
+		SSID:     loadExistingSSID(),
+	}
+	_ = saveCredentials(c)
 	return c
 }
 
@@ -99,7 +152,11 @@ func initCredentials(usernameFlag, passwordFlag string) {
 	if usernameFlag != "" && passwordFlag != "" {
 		username = usernameFlag
 		password = passwordFlag
-		saveCredentials(credentials{Username: username, Password: password})
+		_ = saveCredentials(credentials{
+			Username: username,
+			Password: password,
+			SSID:     loadExistingSSID(),
+		})
 		return
 	}
 

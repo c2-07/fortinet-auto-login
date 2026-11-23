@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 const (
@@ -67,6 +69,30 @@ func loadConfig() appConfig {
 	return cfg
 }
 
+// effectiveConfig returns the saved configuration with environment variable
+// overrides applied (FORTINET_CHECK_URL, FORTINET_INTERVAL). These overrides are
+// never written back to config.json.
+func effectiveConfig() appConfig {
+	cfg := loadConfig()
+	if v := strings.TrimSpace(os.Getenv("FORTINET_CHECK_URL")); v != "" {
+		cfg.CheckURLs = []string{v}
+	}
+	if v := strings.TrimSpace(os.Getenv("FORTINET_INTERVAL")); v != "" {
+		if secs, err := strconv.Atoi(v); err == nil && secs > 0 {
+			cfg.DaemonIntervalSecs = secs
+		}
+	}
+	return cfg
+}
+
+func (c appConfig) requestTimeout() time.Duration {
+	return time.Duration(c.RequestTimeoutSecs) * time.Second
+}
+
+func (c appConfig) daemonInterval() time.Duration {
+	return time.Duration(c.DaemonIntervalSecs) * time.Second
+}
+
 func saveConfig(cfg appConfig) error {
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
@@ -91,16 +117,22 @@ func setPortalHost(host string) error {
 }
 
 func printConfig() {
-	cfg := loadConfig()
+	cfg := effectiveConfig()
 	path := configFilePath()
 
 	fmt.Println("=== Campus & Engine Configuration ===")
 	fmt.Printf("Config File:          %s\n", path)
-	fmt.Printf("Campus Gateway Host:  %s\n", cfg.PortalHost)
-	fmt.Printf("Gateway Probe Port:   1003 (HTTPS)\n")
-	fmt.Printf("Daemon Interval:      %ds\n", cfg.DaemonIntervalSecs)
+	fmt.Printf("Campus Gateway Host:  %s\n", getEffectivePortalHost())
+	fmt.Printf("Daemon Interval:      %ds (used when -interval is not given)\n", cfg.DaemonIntervalSecs)
 	fmt.Printf("Request Timeout:      %ds\n", cfg.RequestTimeoutSecs)
 	fmt.Printf("Max HTTP Retries:     %d\n", cfg.MaxRetries)
+
+	ssids := "Any network"
+	if c, _ := loadCredentials(); len(parseSSIDList(c.SSID)) > 0 {
+		ssids = strings.Join(parseSSIDList(c.SSID), ", ")
+	}
+	fmt.Printf("Allowed Wi-Fi SSIDs:  %s (change with: autologin -ssid \"A,B\")\n", ssids)
+
 	fmt.Println("\nConnectivity Check Endpoints (Primary & Fallbacks):")
 	for idx, url := range cfg.CheckURLs {
 		if idx == 0 {
@@ -109,6 +141,7 @@ func printConfig() {
 			fmt.Printf("  [%d] %s (Fallback)\n", idx+1, url)
 		}
 	}
+	fmt.Println("\nEdit the config file directly to change timeouts, retries, interval or check URLs.")
 	fmt.Println()
 }
 

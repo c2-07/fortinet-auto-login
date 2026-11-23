@@ -36,7 +36,29 @@ func daemonWithTickHandler(ctx context.Context, interval time.Duration, tickFn f
 	}
 }
 
+const keepaliveRefreshMargin = 2 * time.Minute
+
+func isAllowedSSID(allowedRaw string) bool {
+	if len(parseSSIDList(allowedRaw)) == 0 {
+		return true
+	}
+	current, err := getCurrentSSID()
+	if err != nil {
+		if strings.Contains(err.Error(), "Location Privacy") {
+			// macOS blocked SSID detection; fall back to checking the portal directly.
+			return true
+		}
+		// Disconnected from Wi-Fi.
+		return false
+	}
+	return ssidMatches(allowedRaw, current)
+}
+
 func checkDaemonTick(wasFortinet *bool) {
+	if allowed := loadExistingSSID(); allowed != "" && !isAllowedSSID(allowed) {
+		return
+	}
+
 	det := DetectFortinetNetwork()
 	if det.IsFortinetNetwork {
 		if !*wasFortinet {
@@ -47,8 +69,9 @@ func checkDaemonTick(wasFortinet *bool) {
 			}
 			*wasFortinet = true
 		}
-		// If internet is already connected, no authentication is needed
+		// If internet is already connected, refresh the session proactively if it's nearing expiry
 		if det.InternetConnected {
+			maybeRefreshSession(keepaliveRefreshMargin)
 			return
 		}
 		authLock, err := acquireProcessLock("auth")
@@ -80,6 +103,11 @@ func runAutoMode() {
 	username = c.Username
 	password = c.Password
 
+	// Enforce SSID allow-list before spending time on network probes
+	if !isAllowedSSID(c.SSID) {
+		return
+	}
+
 	// Check if we are on a Fortinet network using our primary detection engine
 	det := DetectFortinetNetwork()
 	if !det.IsFortinetNetwork {
@@ -87,35 +115,12 @@ func runAutoMode() {
 		return
 	}
 
-	// If internet is already reachable, no captive portal interception is occurring
+	// If internet is already reachable, refresh the session if it's close to expiring
 	if det.InternetConnected {
+		maybeRefreshSession(keepaliveRefreshMargin)
 		return
 	}
 
-	if c.SSID != "" {
-		current, err := getCurrentSSID()
-		if err != nil {
-			if strings.Contains(err.Error(), "Location Privacy") {
-				// macOS blocked SSID detection. Fall back to checking the portal directly.
-				// We don't exit here so the script still functions perfectly.
-			} else {
-				// We are actually disconnected from Wi-Fi. Safe to exit.
-				return
-			}
-		} else {
-			// We successfully read the SSID. Strictly enforce it.
-			matched := false
-			for _, s := range strings.Split(c.SSID, ",") {
-				if strings.Contains(strings.ToUpper(current), strings.ToUpper(strings.TrimSpace(s))) {
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				return
-			}
-		}
-	}
 	authLock, err := acquireProcessLock("auth")
 	if err != nil {
 		return

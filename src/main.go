@@ -23,6 +23,7 @@ func printCustomUsage() {
 	fmt.Println("\nAuthentication & Session:")
 	fmt.Println("  autologin                    Log in to captive portal (default, prompts on first run)")
 	fmt.Println("  autologin -u <user> -p <pwd> Update saved credentials and authenticate")
+	fmt.Println("  autologin -ssid \"A,B\"        Restrict auto-login to specific Wi-Fi SSIDs (\"\" to clear)")
 	fmt.Println("  autologin -clear-creds       Delete saved credentials and active session cache")
 	fmt.Println("  autologin -logout            Log out of current captive portal session")
 	fmt.Println("\nNetwork & Diagnostics:")
@@ -45,7 +46,7 @@ func printCustomUsage() {
 	fmt.Println("  autologin -config reset      Reset configuration to factory defaults")
 	fmt.Println("  autologin -host <host:port>  Temporarily override campus gateway host for this run")
 	fmt.Println("  autologin -upgrade           Check for and install the latest release from GitHub")
-	fmt.Println("  autologin -uninstall         Completely uninstall autologin and remove all data")
+	fmt.Println("  autologin -uninstall [-y]    Completely uninstall autologin and remove all data")
 	fmt.Println("  autologin -version           Print version information")
 	fmt.Println("")
 }
@@ -107,11 +108,12 @@ func main() {
 	flag.StringVar(&runtimeHostOverride, "portal", "", "alias for -host")
 
 	// Credentials
-	var usernameFlag, passwordFlag string
+	var usernameFlag, passwordFlag, ssidFlag string
 	flag.StringVar(&usernameFlag, "username", "", "portal username")
 	flag.StringVar(&usernameFlag, "u", "", "shorthand for -username")
 	flag.StringVar(&passwordFlag, "password", "", "portal password")
 	flag.StringVar(&passwordFlag, "p", "", "shorthand for -password")
+	flag.StringVar(&ssidFlag, "ssid", "", "comma-separated Wi-Fi SSID allow-list for background login (\"\" to clear)")
 
 	var clearCredsFlag bool
 	flag.BoolVar(&clearCredsFlag, "clear-creds", false, "delete saved credentials and active session cache")
@@ -134,17 +136,19 @@ func main() {
 	var serviceFlag string
 	flag.StringVar(&serviceFlag, "service", "", "manage background service: install | uninstall | status")
 
-	var installFlag, serviceUninstallFlag, fullUninstallFlag bool
+	var installFlag, serviceUninstallFlag, fullUninstallFlag, yesFlag bool
 	flag.BoolVar(&installFlag, "install", false, "alias for -service install")
 	flag.BoolVar(&serviceUninstallFlag, "service-uninstall", false, "remove background service")
 	flag.BoolVar(&fullUninstallFlag, "uninstall", false, "completely uninstall autologin and remove all data")
+	flag.BoolVar(&yesFlag, "yes", false, "skip confirmation prompts (use with -uninstall)")
+	flag.BoolVar(&yesFlag, "y", false, "shorthand for -yes")
 
 	var daemonFlag bool
 	flag.BoolVar(&daemonFlag, "daemon", false, "run forever, auto re-logging in whenever the session drops")
 	flag.BoolVar(&daemonFlag, "d", false, "shorthand for -daemon")
 
 	var intervalFlag time.Duration
-	flag.DurationVar(&intervalFlag, "interval", 45*time.Second, "polling interval for -daemon")
+	flag.DurationVar(&intervalFlag, "interval", 45*time.Second, "polling interval for -daemon (defaults to config.json)")
 	flag.DurationVar(&intervalFlag, "i", 45*time.Second, "shorthand for -interval")
 
 	// Cloudflare WARP Bypass
@@ -177,6 +181,11 @@ func main() {
 
 	flag.Parse()
 
+	flagsSet := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) {
+		flagsSet[f.Name] = true
+	})
+
 	// 1. Maintenance & Version
 	if versionFlag {
 		fmt.Printf("fortinet-auto-login %s, commit %s, built at %s\n", version, commit, date)
@@ -192,7 +201,7 @@ func main() {
 
 	// 1b. Full Uninstall
 	if fullUninstallFlag {
-		fullUninstall()
+		fullUninstall(yesFlag)
 		return
 	}
 
@@ -200,6 +209,23 @@ func main() {
 	if clearCredsFlag {
 		clearCredentials()
 		return
+	}
+
+	// 1d. Wi-Fi SSID allow-list configuration
+	if flagsSet["ssid"] {
+		if err := setAllowedSSIDs(ssidFlag); err != nil {
+			fmt.Printf("\033[31m[FAIL]\033[0m   Failed to save SSID filter: %v\n", err)
+			os.Exit(1)
+		}
+		allowed := parseSSIDList(ssidFlag)
+		if len(allowed) == 0 {
+			fmt.Println("\033[32m[OK]\033[0m     Cleared Wi-Fi SSID filter (auto-login enabled on any network).")
+		} else {
+			fmt.Printf("\033[32m[OK]\033[0m     Allowed Wi-Fi SSIDs updated to: %s\n", strings.Join(allowed, ", "))
+		}
+		if usernameFlag == "" && passwordFlag == "" && !daemonFlag && !keepaliveFlag && !logoutFlag {
+			return
+		}
 	}
 
 	// 2. Status & Diagnostics
@@ -285,6 +311,9 @@ func main() {
 	}
 
 	if daemonFlag {
+		if !flagsSet["interval"] && !flagsSet["i"] {
+			intervalFlag = effectiveConfig().daemonInterval()
+		}
 		procLock, err := acquireProcessLock("daemon")
 		if err != nil {
 			logf("\033[33m[WARN]\033[0m   Another autologin process is already active. Exiting.")

@@ -2,6 +2,8 @@ package main
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/xml"
 	"fmt"
 	"io"
 	"os"
@@ -11,6 +13,12 @@ import (
 	"strings"
 	"time"
 )
+
+func xmlEscape(s string) string {
+	var buf bytes.Buffer
+	_ = xml.EscapeText(&buf, []byte(s))
+	return buf.String()
+}
 
 func getCurrentSSID() (string, error) {
 	if runtime.GOOS == "windows" {
@@ -147,6 +155,59 @@ func serviceStatus() {
 	}
 }
 
+// buildWindowsTaskXML returns a Task Scheduler 1.2 XML definition that avoids
+// schtasks's restrictive defaults (battery stop/disallow and 72-hour kill limit),
+// hides the background window, and restarts on failure.
+func buildWindowsTaskXML(exe string) string {
+	return fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>Fortinet Captive Portal Auto-Login Daemon</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <LogonTrigger>
+      <Enabled>true</Enabled>
+    </LogonTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <LogonType>InteractiveToken</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <Enabled>true</Enabled>
+    <Hidden>true</Hidden>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>3</Count>
+    </RestartOnFailure>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>%s</Command>
+      <Arguments>-daemon</Arguments>
+    </Exec>
+  </Actions>
+</Task>
+`, xmlEscape(exe))
+}
+
 func installWindows(exe string) {
 	// schtasks needs admin
 	if ensureAdmin("install") {
@@ -154,17 +215,30 @@ func installWindows(exe string) {
 	}
 
 	taskName := "FortinetAutoLogin"
-	trArg := fmt.Sprintf("\"%s\" -daemon", exe)
+
+	tmpFile, err := os.CreateTemp("", "autologin-task-*.xml")
+	if err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to create temporary task XML: %v\n", err)
+		return
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := tmpFile.WriteString(buildWindowsTaskXML(exe)); err != nil {
+		_ = tmpFile.Close()
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to write task XML: %v\n", err)
+		return
+	}
+	_ = tmpFile.Close()
 
 	cmd := exec.Command("schtasks",
 		"/create",
 		"/tn", taskName,
-		"/tr", trArg,
-		"/sc", "onlogon",
+		"/xml", tmpPath,
 		"/f",
 	)
-	if err := cmd.Run(); err != nil {
-		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to create scheduled task via schtasks: %v\n", err)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		fmt.Printf("\033[31m[FAIL]\033[0m   Failed to create scheduled task via schtasks: %v (%s)\n", err, strings.TrimSpace(string(out)))
 		return
 	}
 
@@ -172,7 +246,7 @@ func installWindows(exe string) {
 
 	logPath := getLogFilePath()
 	fmt.Println("\033[32m[OK]\033[0m     Windows Task Scheduler background service installed and started!")
-	fmt.Println("\033[36m[INFO]\033[0m   Runs automatically at logon with 45s session watchdog")
+	fmt.Println("\033[36m[INFO]\033[0m   Runs automatically at logon (battery-safe, no 72h limit, auto-restart on failure)")
 	fmt.Printf("\033[36m[INFO]\033[0m   Logs: %s\n", logPath)
 }
 
@@ -276,7 +350,7 @@ func installDarwin(exe string) {
     <key>StandardErrorPath</key>
     <string>/tmp/autologin.err.log</string>
 </dict>
-</plist>`, exe)
+</plist>`, xmlEscape(exe))
 
 	err := os.WriteFile(plistPath, []byte(plistContent), 0644)
 	if err != nil {
@@ -460,6 +534,46 @@ func viewLogs(follow bool, linesCount int) {
 	}
 }
 
+// stripInstallerPathBlock removes only the exact block written by install.sh
+// (the installer comment and the export PATH line immediately following it),
+// leaving all other user lines untouched.
+func stripInstallerPathBlock(content string) (string, bool) {
+	const (
+		installerComment = "# Added by fortinet-auto-login installer"
+		installerExport  = `export PATH="$HOME/.local/bin:$PATH"`
+	)
+
+	hadTrailingNewline := strings.HasSuffix(content, "\n")
+	lines := strings.Split(strings.TrimSuffix(content, "\n"), "\n")
+	filtered := make([]string, 0, len(lines))
+	changed := false
+
+	for i := 0; i < len(lines); i++ {
+		if strings.TrimSpace(lines[i]) == installerComment {
+			changed = true
+			// Drop the export line added right after the comment, if present.
+			if i+1 < len(lines) && strings.TrimSpace(lines[i+1]) == installerExport {
+				i++
+			}
+			// Drop a single blank separator line install.sh wrote before the comment.
+			if len(filtered) > 0 && strings.TrimSpace(filtered[len(filtered)-1]) == "" {
+				filtered = filtered[:len(filtered)-1]
+			}
+			continue
+		}
+		filtered = append(filtered, lines[i])
+	}
+
+	if !changed {
+		return content, false
+	}
+	out := strings.Join(filtered, "\n")
+	if hadTrailingNewline && out != "" {
+		out += "\n"
+	}
+	return out, true
+}
+
 func cleanShellPathUnix() {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -476,16 +590,7 @@ func cleanShellPathUnix() {
 		if err != nil {
 			continue
 		}
-		content := string(contentBytes)
-		if strings.Contains(content, "fortinet-auto-login") {
-			var filtered []string
-			for _, line := range strings.Split(content, "\n") {
-				if !strings.Contains(line, "fortinet-auto-login") &&
-					!strings.Contains(line, "# Added by fortinet-auto-login installer") {
-					filtered = append(filtered, line)
-				}
-			}
-			newContent := strings.Join(filtered, "\n") + "\n"
+		if newContent, changed := stripInstallerPathBlock(string(contentBytes)); changed {
 			_ = os.WriteFile(rc, []byte(newContent), 0o644)
 		}
 	}
@@ -502,14 +607,39 @@ func cleanShellPathWindows() {
 	_ = exec.Command("powershell", "-NoProfile", "-Command", script).Run()
 }
 
-func fullUninstall() {
+func confirmUninstall(in io.Reader) bool {
+	fmt.Println("\033[33m[WARN]\033[0m   This will remove:")
+	fmt.Println("           - Background service (launchd / systemd / Task Scheduler)")
+	fmt.Println("           - Saved credentials, config, and session cache (~/.fortinet-autologin)")
+	fmt.Println("           - Background log files and installer PATH block")
+	fmt.Println("           - The autologin executable itself")
+	fmt.Print("Proceed with complete uninstall? [y/N]: ")
+
+	reader := bufio.NewReader(in)
+	line, err := reader.ReadString('\n')
+	if err != nil && len(line) == 0 {
+		return false
+	}
+	ans := strings.ToLower(strings.TrimSpace(line))
+	return ans == "y" || ans == "yes"
+}
+
+func fullUninstall(skipConfirm bool) {
+	if !skipConfirm && !confirmUninstall(os.Stdin) {
+		fmt.Println("\033[36m[INFO]\033[0m   Uninstall cancelled.")
+		return
+	}
+
 	fmt.Println("\033[33m[UNINSTALL]\033[0m Completely uninstalling autologin...")
 
 	// 1. Remove background service
 	uninstallAgent()
 
-	// 2. Disconnect WARP
-	_ = exec.Command("warp-cli", "disconnect").Run()
+	// 2. Disconnect WARP and restore any settings modified by -warp
+	if _, err := exec.LookPath("warp-cli"); err == nil {
+		_, _ = cmdRunner("warp-cli", "disconnect")
+		resetWarpSettings()
+	}
 
 	// 3. Remove data directory
 	appDir := getAppDir()

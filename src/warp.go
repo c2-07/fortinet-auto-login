@@ -1,11 +1,15 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"math/rand"
-	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -13,7 +17,42 @@ import (
 
 // cmdRunner executes commands for WARP operations, mockable in tests.
 var cmdRunner = func(name string, args ...string) ([]byte, error) {
-	return exec.Command(name, args...).CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	return exec.CommandContext(ctx, name, args...).CombinedOutput()
+}
+
+// warpRotationBudget caps total time spent sweeping Anycast endpoints in -warp.
+var warpRotationBudget = 60 * time.Second
+
+// warpState records WARP settings modified by autologin so -warp-disconnect
+// and -uninstall can restore the user's prior configuration.
+type warpState struct {
+	ConnectivityCheckWasEnabled bool `json:"connectivity_check_was_enabled"`
+}
+
+func warpStateFilePath() string {
+	return filepath.Join(getAppDir(), "warp_state.json")
+}
+
+func loadWarpState() warpState {
+	var s warpState
+	data, err := os.ReadFile(warpStateFilePath())
+	if err != nil {
+		return s
+	}
+	_ = json.Unmarshal(data, &s)
+	return s
+}
+
+func saveWarpState(s warpState) {
+	if data, err := json.Marshal(s); err == nil {
+		_ = os.WriteFile(warpStateFilePath(), data, 0o600)
+	}
+}
+
+func clearWarpState() {
+	_ = os.Remove(warpStateFilePath())
 }
 
 // Comprehensive Cloudflare WARP Anycast IP pools
@@ -81,19 +120,13 @@ func generateCandidateEndpoints() []string {
 	return candidates
 }
 
-func preflightProbe(endpoint string) bool {
-	conn, err := net.DialTimeout("udp", endpoint, 400*time.Millisecond)
-	if err != nil {
-		return false
-	}
-	conn.Close()
-	return true
-}
-
 // testInternetConnectivity verifies live outbound HTTP reachability through the tunnel.
 func testInternetConnectivity(timeout time.Duration) bool {
 	client := &http.Client{
 		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
 	}
 
 	// Probe 1: Direct IP query to Cloudflare trace
@@ -105,11 +138,12 @@ func testInternetConnectivity(timeout time.Duration) bool {
 		}
 	}
 
-	// Probe 2: Standard HTTP connectivity check
+	// Probe 2: Standard HTTP connectivity check (verify body so captive portal 200s don't false-positive)
 	resp2, err2 := client.Get("http://detectportal.firefox.com/success.txt")
 	if err2 == nil {
+		body, _ := io.ReadAll(io.LimitReader(resp2.Body, 4096))
 		_ = resp2.Body.Close()
-		if resp2.StatusCode == http.StatusOK {
+		if resp2.StatusCode == http.StatusOK && strings.EqualFold(strings.TrimSpace(string(body)), "success") {
 			return true
 		}
 	}
@@ -118,7 +152,7 @@ func testInternetConnectivity(timeout time.Duration) bool {
 	resp3, err3 := client.Get("https://cp.cloudflare.com/generate_204")
 	if err3 == nil {
 		_ = resp3.Body.Close()
-		if resp3.StatusCode == http.StatusNoContent || resp3.StatusCode == http.StatusOK {
+		if resp3.StatusCode == http.StatusNoContent {
 			return true
 		}
 	}
@@ -196,7 +230,7 @@ func recoverViaWiFiCycle() bool {
 	logf("\033[33m[WARN]\033[0m   WARP tunnel connected but internet traffic is blackholed by FortiGate.")
 	logf("\033[36m[ACTION]\033[0m Automatically restarting Wi-Fi to renew DHCP lease and reset firewall session table...")
 
-	_ = exec.Command("warp-cli", "disconnect").Run()
+	_, _ = cmdRunner("warp-cli", "disconnect")
 	time.Sleep(500 * time.Millisecond)
 
 	if !CycleWiFi() {
@@ -224,12 +258,12 @@ func recoverViaWiFiCycle() bool {
 	recoveryEndpoints := []string{"162.159.192.1:500", "162.159.192.1:4500", "162.159.193.1:500"}
 	logf("\033[36m[WARP]\033[0m   Retrying Cloudflare WARP with fresh IP and clean session table...")
 	for _, ep := range recoveryEndpoints {
-		_ = exec.Command("warp-cli", "tunnel", "endpoint", "set", ep).Run()
-		_ = exec.Command("warp-cli", "connect").Run()
+		_, _ = cmdRunner("warp-cli", "tunnel", "endpoint", "set", ep)
+		_, _ = cmdRunner("warp-cli", "connect")
 
 		for attempt := 0; attempt < 8; attempt++ {
 			time.Sleep(800 * time.Millisecond)
-			chk, _ := exec.Command("warp-cli", "status").CombinedOutput()
+			chk, _ := cmdRunner("warp-cli", "status")
 			if strings.Contains(string(chk), "Connected") {
 				if testInternetConnectivity(3 * time.Second) {
 					logf("\033[32m[OK]\033[0m     Success! Reconnected to Cloudflare WARP via %s (Internet verified active)", ep)
@@ -237,10 +271,11 @@ func recoverViaWiFiCycle() bool {
 				}
 			}
 		}
-		_ = exec.Command("warp-cli", "disconnect").Run()
+		_, _ = cmdRunner("warp-cli", "disconnect")
 	}
 
-	logf("\033[31m[FAIL]\033[0m   Unable to restore WARP connection. Tunnel safely disconnected.")
+	resetWarpSettings()
+	logf("\033[31m[FAIL]\033[0m   Unable to restore WARP connection. Tunnel disconnected and settings restored.")
 	return false
 }
 
@@ -295,8 +330,20 @@ func ensureWarpConnectivityCheckDisabled() bool {
 		logf("\033[33m[WARN]\033[0m   Failed to disable WARP connectivity check: %v (%s)", disErr, strings.TrimSpace(string(disOut)))
 		return false
 	}
+	saveWarpState(warpState{ConnectivityCheckWasEnabled: true})
 	logf("\033[32m[OK]\033[0m     WARP internal connectivity check disabled successfully.")
 	return true
+}
+
+// resetWarpSettings undoes the endpoint, protocol, and connectivity-check
+// overrides applied by FixAndConnectWarp so WARP behaves normally off campus.
+func resetWarpSettings() {
+	_, _ = cmdRunner("warp-cli", "tunnel", "endpoint", "reset")
+	_, _ = cmdRunner("warp-cli", "tunnel", "protocol", "reset")
+	if loadWarpState().ConnectivityCheckWasEnabled {
+		_, _ = cmdRunner("warp-cli", "debug", "connectivity-check", "enable")
+		clearWarpState()
+	}
 }
 
 // FixAndConnectWarp systematically finds a responsive Cloudflare endpoint across Anycast pools:
@@ -341,10 +388,10 @@ func FixAndConnectWarp() bool {
 	}
 
 	ensureWarpConnectivityCheckDisabled()
-	_ = exec.Command("warp-cli", "tunnel", "protocol", "set", "WireGuard").Run()
+	_, _ = cmdRunner("warp-cli", "tunnel", "protocol", "set", "WireGuard")
 
 	// Step 3: Check if already connected and verify live internet
-	statusOut, _ := exec.Command("warp-cli", "status").CombinedOutput()
+	statusOut, _ := cmdRunner("warp-cli", "status")
 	if strings.Contains(string(statusOut), "Connected") {
 		logf("  Checking existing WARP connection health...")
 		if testInternetConnectivity(3 * time.Second) {
@@ -352,39 +399,39 @@ func FixAndConnectWarp() bool {
 			return true
 		}
 		logf("\033[33m[WARN]\033[0m   WARP is connected but internet traffic is stalled. Disconnecting to rotate...")
-		_ = exec.Command("warp-cli", "disconnect").Run()
+		_, _ = cmdRunner("warp-cli", "disconnect")
 		time.Sleep(200 * time.Millisecond)
 	}
 
 	logf("\033[36m[WARP]\033[0m   Initializing intelligent Cloudflare WARP auto-rotation...")
 	endpoints := generateCandidateEndpoints()
-	logf("  Generated %d candidate endpoint combinations across %d Anycast IP pools", len(endpoints), len(warpAnycastIPs))
+	logf("  Generated %d candidate endpoint combinations across %d Anycast IP pools (budget: %s)", len(endpoints), len(warpAnycastIPs), warpRotationBudget)
 
-	// Step 4: Rotate candidates
+	// Step 4: Rotate through candidates within the time budget
+	deadline := time.Now().Add(warpRotationBudget)
 	for i, ep := range endpoints {
-		if i >= 8 {
+		if time.Now().After(deadline) {
+			logf("\033[33m[WARN]\033[0m   Rotation time budget (%s) reached after testing %d endpoints.", warpRotationBudget, i)
 			break
 		}
 
-		if !preflightProbe(ep) {
-			continue
+		logf("\033[34m[WARP]\033[0m   Testing endpoint [%d/%d]: %s...", i+1, len(endpoints), ep)
+		if i > 0 {
+			_, _ = cmdRunner("warp-cli", "disconnect")
+			time.Sleep(300 * time.Millisecond)
 		}
 
-		logf("\033[34m[WARP]\033[0m   Testing endpoint [%d/8]: %s...", i+1, ep)
-		_ = exec.Command("warp-cli", "disconnect").Run()
-		time.Sleep(300 * time.Millisecond)
-
-		_ = exec.Command("warp-cli", "tunnel", "endpoint", "set", ep).Run()
-		_ = exec.Command("warp-cli", "connect").Run()
+		_, _ = cmdRunner("warp-cli", "tunnel", "endpoint", "set", ep)
+		_, _ = cmdRunner("warp-cli", "connect")
 
 		connected := false
 		for attempt := 0; attempt < 10; attempt++ {
 			time.Sleep(800 * time.Millisecond)
-			chk, _ := exec.Command("warp-cli", "status").CombinedOutput()
+			chk, _ := cmdRunner("warp-cli", "status")
 			chkStr := string(chk)
 
 			if strings.Contains(chkStr, "Connected") {
-				statsOut, _ := exec.Command("warp-cli", "tunnel", "stats").CombinedOutput()
+				statsOut, _ := cmdRunner("warp-cli", "tunnel", "stats")
 				statsStr := string(statsOut)
 				if !strings.Contains(statsStr, "Received: 0B") || attempt >= 5 {
 					connected = true
@@ -407,12 +454,12 @@ func FixAndConnectWarp() bool {
 
 	// Step 5: Tunnel key rotation attempt
 	logf("\033[34m[WARP]\033[0m   Rotating tunnel cryptographic keys...")
-	_ = exec.Command("warp-cli", "tunnel", "rotate-keys").Run()
-	_ = exec.Command("warp-cli", "tunnel", "endpoint", "set", "162.159.192.1:500").Run()
-	_ = exec.Command("warp-cli", "connect").Run()
+	_, _ = cmdRunner("warp-cli", "tunnel", "rotate-keys")
+	_, _ = cmdRunner("warp-cli", "tunnel", "endpoint", "set", "162.159.192.1:500")
+	_, _ = cmdRunner("warp-cli", "connect")
 
 	time.Sleep(2 * time.Second)
-	finalChk, _ := exec.Command("warp-cli", "status").CombinedOutput()
+	finalChk, _ := cmdRunner("warp-cli", "status")
 	if strings.Contains(string(finalChk), "Connected") {
 		if testInternetConnectivity(3 * time.Second) {
 			logf("\033[32m[OK]\033[0m     Connected after tunnel key rotation (Internet verified active)!")
@@ -424,14 +471,15 @@ func FixAndConnectWarp() bool {
 	return recoverViaWiFiCycle()
 }
 
-// DisconnectWarp disconnects WARP cleanly.
+// DisconnectWarp disconnects WARP cleanly and restores WARP settings modified by -warp.
 func DisconnectWarp() bool {
 	logf("\033[34m[WARP]\033[0m   Disconnecting Cloudflare WARP...")
-	out, err := exec.Command("warp-cli", "disconnect").CombinedOutput()
+	out, err := cmdRunner("warp-cli", "disconnect")
 	if err != nil {
 		logf("\033[31m[FAIL]\033[0m   Failed to disconnect: %s", string(out))
 		return false
 	}
-	logf("\033[32m[OK]\033[0m     Cloudflare WARP disconnected. Normal routing restored.")
+	resetWarpSettings()
+	logf("\033[32m[OK]\033[0m     Cloudflare WARP disconnected and default WARP settings restored.")
 	return true
 }

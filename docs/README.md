@@ -37,7 +37,8 @@ autologin -service install
 # Run continuous polling daemon in foreground
 autologin -daemon -interval 30s
 
-# Connect Cloudflare WARP with auto-rotation
+# Connect Cloudflare WARP with auto-rotation (always disconnect first)
+autologin -warp-disconnect
 autologin -warp
 
 # View / follow background service logs

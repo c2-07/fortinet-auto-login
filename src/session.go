@@ -16,10 +16,11 @@ import (
 // session, so it's captured at login time and stashed here for later
 // -logout / -keepalive calls rather than hardcoded.
 type session struct {
-	Scheme    string `json:"scheme"`
-	Host      string `json:"host"`
-	Magic     string `json:"magic"`
-	Countdown int    `json:"countdown"` // seconds, from the keepalive page
+	Scheme      string `json:"scheme"`
+	Host        string `json:"host"`
+	Magic       string `json:"magic"`
+	Countdown   int    `json:"countdown"`              // seconds, from the keepalive page
+	RefreshedAt int64  `json:"refreshed_at,omitempty"` // unix timestamp of last login/keepalive
 }
 
 var countdownRe = regexp.MustCompile(`id="countdown">(\d+)<`)

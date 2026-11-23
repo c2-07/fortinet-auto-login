@@ -12,8 +12,6 @@ import (
 )
 
 const (
-	checkURL = "http://cp.cloudflare.com/generate_204"
-
 	// Fallback gateway used for logout when no saved session exists — e.g.
 	// the script never ran login in this environment, or the cache was
 	// cleared. The portal doesn't validate the magic against the actual
@@ -24,13 +22,16 @@ const (
 
 var portalRe = regexp.MustCompile(`window\.location="([^"]+)"`)
 
+// makeClient builds the captive-portal HTTP client using the configured
+// request timeout (config.json: request_timeout_secs).
 func makeClient() *http.Client {
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		IdleConnTimeout: 30 * time.Second,
 	}
 	return &http.Client{
 		Transport: transport,
-		Timeout:   4 * time.Second,
+		Timeout:   effectiveConfig().requestTimeout(),
 		// Don't follow redirects automatically — mirrors allow_redirects=False.
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			return http.ErrUseLastResponse
@@ -107,43 +108,79 @@ func probeDirectGateway(client *http.Client) (string, error) {
 	return "", fmt.Errorf("direct gateway probe failed")
 }
 
-func getPortal(client *http.Client) (string, bool, error) {
-	resp, err := doWithRetry(client, func() (*http.Request, error) {
-		req, err := http.NewRequest(http.MethodGet, checkURL, nil)
-		return req, err
-	}, 2)
-	if err == nil {
-		defer resp.Body.Close()
+// probeResult is the outcome of a single connectivity check URL.
+type probeResult int
 
-		if resp.StatusCode == http.StatusNoContent {
-			return "", true, nil
+const (
+	probeUnknown   probeResult = iota // reachable, but response not recognised
+	probeConnected                    // internet is reachable
+	probePortal                       // captive portal intercepted the request
+)
+
+// classifyCheckResponse interprets a connectivity check response. It understands
+// the common check services (Cloudflare/Google 204, Firefox "success", Apple
+// "<TITLE>Success</TITLE>", Microsoft "Microsoft Connect Test") and FortiGate
+// interception via a JS redirect body or a Location header pointing at /fgtauth.
+func classifyCheckResponse(status int, location, body string) (probeResult, string) {
+	if status == http.StatusNoContent {
+		return probeConnected, ""
+	}
+	if m := portalRe.FindStringSubmatch(body); len(m) > 1 {
+		return probePortal, m[1]
+	}
+	if status >= 300 && status < 400 && strings.Contains(location, "/fgtauth") {
+		return probePortal, location
+	}
+	if status == http.StatusOK {
+		text := strings.TrimSpace(body)
+		if strings.EqualFold(text, "success") ||
+			strings.Contains(text, "<TITLE>Success</TITLE>") ||
+			strings.HasPrefix(text, "Microsoft Connect Test") {
+			return probeConnected, ""
+		}
+	}
+	return probeUnknown, ""
+}
+
+func getPortal(client *http.Client) (string, bool, error) {
+	cfg := effectiveConfig()
+
+	// Walk the configured check URLs in priority order (config.json:
+	// check_urls). The first conclusive answer wins; unreachable or
+	// unrecognised endpoints fall through to the next one.
+	var lastErr error
+	for _, checkURL := range cfg.CheckURLs {
+		resp, err := doWithRetry(client, func() (*http.Request, error) {
+			return http.NewRequest(http.MethodGet, checkURL, nil)
+		}, cfg.MaxRetries)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		body, readErr := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
 		}
 
-		body, err := io.ReadAll(resp.Body)
-		if err == nil {
-			text := strings.TrimSpace(string(body))
-			if text == "success" {
-				return "", true, nil
-			}
-
-			matches := portalRe.FindStringSubmatch(text)
-			if len(matches) > 1 {
-				return matches[1], false, nil
-			}
+		result, portal := classifyCheckResponse(resp.StatusCode, resp.Header.Get("Location"), string(body))
+		switch result {
+		case probeConnected:
+			return "", true, nil
+		case probePortal:
+			return portal, false, nil
 		}
 	}
 
-	// Fallback to direct gateway IP probe if external probe failed or times out
-	// (e.g. when logged out and external DNS is blocked).
+	// Fallback to direct gateway IP probe if every external probe failed or
+	// timed out (e.g. when logged out and external DNS is blocked).
 	directPortal, errDirect := probeDirectGateway(client)
 	if errDirect == nil && directPortal != "" {
 		return directPortal, false, nil
 	}
 
-	if err != nil {
-		return "", false, err
-	}
-	return "", false, nil
+	return "", false, lastErr
 }
 
 func login(quiet bool, isRetry bool) bool {
@@ -174,7 +211,7 @@ func login(quiet bool, isRetry bool) bool {
 	// Visit the portal first to establish cookies/session.
 	pageResp, err := doWithRetry(client, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, portal, nil)
-	}, 2)
+	}, effectiveConfig().MaxRetries)
 	if err != nil {
 		logf("Failed to load login page.")
 		return false
@@ -230,7 +267,7 @@ func login(quiet bool, isRetry bool) bool {
 				"AppleWebKit/537.36 (KHTML, like Gecko) "+
 				"Chrome/138.0 Safari/537.36")
 		return req, nil
-	}, 2)
+	}, effectiveConfig().MaxRetries)
 	if err != nil {
 		logf("Login request failed.")
 		return false
@@ -260,7 +297,8 @@ func login(quiet bool, isRetry bool) bool {
 			// For manual interactive runs, we can prompt again if it seems like a typo.
 			// But to be safe, only prompt if it's explicitly a bad password.
 			if isBadCreds {
-				deleteCredentials()
+				// promptCredentials overwrites the saved file (keeping the SSID
+				// allow-list), so a Ctrl-C at the prompt doesn't lose anything.
 				c := promptCredentials()
 				username = c.Username
 				password = c.Password
@@ -284,10 +322,11 @@ func login(quiet bool, isRetry bool) bool {
 	// The magic used for logout/keepalive is the same one used for login,
 	// carried in the portal URL's query string.
 	s := session{
-		Scheme:    scheme,
-		Host:      host,
-		Magic:     magicToken,
-		Countdown: extractCountdown(text),
+		Scheme:      scheme,
+		Host:        host,
+		Magic:       magicToken,
+		Countdown:   extractCountdown(text),
+		RefreshedAt: time.Now().Unix(),
 	}
 	saveSession(s)
 
@@ -307,7 +346,7 @@ func logout() bool {
 	client := makeClient()
 	resp, err := doWithRetry(client, func() (*http.Request, error) {
 		return http.NewRequest(http.MethodGet, logoutURL, nil)
-	}, 2)
+	}, effectiveConfig().MaxRetries)
 
 	// Clean up local session and invalidate detection cache immediately
 	clearSession()
@@ -328,45 +367,63 @@ func logout() bool {
 	return true
 }
 
-// keepalive periodically hits the keepalive URL before the session's
-// countdown expires, mirroring what the browser's background tab does with
-// its timer + redirect. Runs until the process is stopped or an attempt
-// exhausts its retries.
-func keepalive() {
+// refreshSession calls the portal's keepalive URL, which resets the FortiGate
+// authentication timer the same way the browser's keepalive tab does, and
+// stores the new countdown in the session cache.
+func refreshSession(s session) (session, error) {
+	keepaliveURL := fmt.Sprintf("%s://%s/keepalive?%s", s.Scheme, s.Host, s.Magic)
+	resp, err := doWithRetry(makeClient(), func() (*http.Request, error) {
+		return http.NewRequest(http.MethodGet, keepaliveURL, nil)
+	}, effectiveConfig().MaxRetries)
+	if err != nil {
+		return s, err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if err != nil {
+		return s, err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return s, fmt.Errorf("keepalive HTTP %d", resp.StatusCode)
+	}
+
+	s.Countdown = extractCountdown(string(body))
+	s.RefreshedAt = time.Now().Unix()
+	return s, saveSession(s)
+}
+
+// sessionNeedsRefresh reports whether the session's authentication timer will
+// expire within margin. Sessions without a refresh timestamp (written by older
+// versions) are left alone; they get one on the next login.
+func sessionNeedsRefresh(s session, now time.Time, margin time.Duration) bool {
+	if s.RefreshedAt == 0 || s.Countdown <= 0 {
+		return false
+	}
+	lifetime := time.Duration(s.Countdown) * time.Second
+	if half := lifetime / 2; margin > half {
+		margin = half
+	}
+	expiresAt := time.Unix(s.RefreshedAt, 0).Add(lifetime)
+	return expiresAt.Sub(now) <= margin
+}
+
+// maybeRefreshSession sends a keepalive when the saved session is close to
+// expiring, so the user isn't dropped offline until the next re-login. On
+// failure it stops refreshing that session; the normal re-login path takes
+// over if the portal does log the user out.
+func maybeRefreshSession(margin time.Duration) {
 	s, ok := loadSession()
-	if !ok {
-		logf("\033[31m[FAIL]\033[0m   No session for keepalive")
+	if !ok || !sessionNeedsRefresh(s, time.Now(), margin) {
 		return
 	}
-	logf("\033[36m[INIT]\033[0m   Keepalive (host=%s magic=%s timeout=%ds)", s.Host, s.Magic, s.Countdown)
 
-	client := makeClient()
-
-	for {
-		wait := time.Duration(s.Countdown-30) * time.Second
-		if wait <= 0 {
-			wait = 5 * time.Second
-		}
-		time.Sleep(wait)
-
-		keepaliveURL := fmt.Sprintf("%s://%s/keepalive?%s", s.Scheme, s.Host, s.Magic)
-		resp, err := doWithRetry(client, func() (*http.Request, error) {
-			return http.NewRequest(http.MethodGet, keepaliveURL, nil)
-		}, 5)
-		if err != nil {
-			logf("\033[31m[FAIL]\033[0m   Keepalive err: %v", err)
-			return
-		}
-
-		body, err := io.ReadAll(resp.Body)
-		resp.Body.Close()
-		if err != nil {
-			logf("\033[31m[FAIL]\033[0m   Keepalive read err")
-			return
-		}
-
-		s.Countdown = extractCountdown(string(body))
-		saveSession(s)
-		logf("\033[32m[OK]\033[0m     Keepalive (reset=%ds)", s.Countdown)
+	updated, err := refreshSession(s)
+	if err != nil {
+		logf("\033[33m[WARN]\033[0m   Session keepalive failed: %v (will re-authenticate if the session drops)", err)
+		s.RefreshedAt = 0
+		_ = saveSession(s)
+		return
 	}
+	logf("\033[32m[OK]\033[0m     Session keepalive sent (timer reset to %ds)", updated.Countdown)
 }

@@ -47,6 +47,18 @@ autologin -service install
 autologin -status
 ```
 
+### 4. Connect Cloudflare WARP (Firewall Circumvention)
+> [!IMPORTANT]
+> Disconnect WARP **before** you start. If a stale or blackholed tunnel is still up, it can hide the Fortinet gateway and the captive portal from detection.
+
+```bash
+autologin -warp-disconnect   # 1. Tear down any existing WARP tunnel & restore native routing
+autologin -warp              # 2. Start the auto-rotation process
+```
+* Detects the Fortinet gateway and logs in to the captive portal if needed.
+* Rotates through Cloudflare Anycast IPs and firewall-friendly ports (`500`, `4500`, `1701`, …) until real internet traffic gets through.
+* If every endpoint is blackholed, it restarts Wi-Fi to get a fresh DHCP lease and tries again.
+
 ---
 
 ## Command Reference
